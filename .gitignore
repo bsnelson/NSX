@@ -26,11 +26,5 @@ Thumbs.db
 .env
 .env.local
 
-# Other skins (reference only)
-_otherSkins/
-
 # Dev/personal files
 .claude/
-_old/
-.github/
-AIREADME.md

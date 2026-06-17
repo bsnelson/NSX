@@ -1,0 +1,40 @@
+name: Build and Release WebUI Skin
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Update manifest version
+        run: |
+          jq '.version = "${{ steps.version.outputs.VERSION }}" | .repository = "${{ github.repository }}"' manifest.json > manifest.tmp.json
+          mv manifest.tmp.json manifest.json
+
+      - name: Create release archive
+        run: |
+          zip -r NSX-${{ steps.version.outputs.VERSION }}.zip \
+            index.html \
+            manifest.json \
+            src/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: NSX-${{ steps.version.outputs.VERSION }}.zip
+          name: NSX ${{ steps.version.outputs.VERSION }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
