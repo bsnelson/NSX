@@ -4815,7 +4815,7 @@ html, body {
 .toast {
   position: fixed;
   top: calc(var(--page-header-height, 56px) - 30px);
-  left: 75%;
+  left: 70%;
   transform: translateX(-50%) translateY(-6px);
   padding: 10px 18px;
   background: rgba(44,44,46,0.96);
