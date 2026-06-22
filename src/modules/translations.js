@@ -430,6 +430,7 @@ const TRANSLATIONS = {
     'beanManager.showLess':    'Weniger',
     'beanManager.placeholder': 'Bohne auswählen, um Details zu sehen',
     'beanManager.pickHint':    'Bohne auswählen, dann Packung antippen',
+    'beanManager.pickTitle':   'Kaffee-Packung auswählen',
 
     // Batch editor
     'batchEditor.title':   'Packung',
@@ -1099,6 +1100,7 @@ const TRANSLATIONS = {
     'beanManager.showLess':    'Less',
     'beanManager.placeholder': 'Select a bean to see details',
     'beanManager.pickHint':    'Select a bean, then tap a batch',
+    'beanManager.pickTitle':   'Pick coffee bean batch',
 
     // Batch editor
     'batchEditor.title':   'Batch',

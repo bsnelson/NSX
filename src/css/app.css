@@ -11264,6 +11264,12 @@ html, body {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.bean-manager-fields.is-readonly .bean-manager-prop-tile,
+.bean-manager-fields.is-readonly .bean-manager-prop-split-half {
+  pointer-events: none;
+  cursor: default;
+}
+
 [data-theme="white"] .bean-manager-prop-tile {
   background: var(--c-fill-1);
   border-color: var(--c-separator);

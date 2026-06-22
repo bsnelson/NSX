@@ -5612,6 +5612,7 @@ let _profilePickerContext = 'editor'; // 'editor' | 'home'
 let _profileFavorites = new Set();
 let _collapsedProfileGroups = new Set();
 let _profilePickerMode = 'my'; // 'my' | 'trash' | 'hidden' | 'copy'
+let _profilePickerShowHidden = false;
 
 function _normalizeCollapsedProfileGroups(value) {
   if (!Array.isArray(value)) return [];
@@ -5765,10 +5766,16 @@ function _updateProfilePickerToolbar() {
   const toggleHiddenBtn = document.getElementById('btn-profile-picker-toggle-hidden');
   const backBtn         = document.getElementById('btn-profile-picker-back-my');
   if (useBtn)           useBtn.hidden = (_profilePickerContext === 'home') || !isMy;
-  if (trashBtn)         trashBtn.hidden = !isMy;
+  if (trashBtn)         trashBtn.hidden = !isMy || _profilePickerContext === 'recipe';
   if (emptyTrashBtn)    emptyTrashBtn.hidden = _profilePickerMode !== 'trash';
-  if (addBtn)           addBtn.hidden = !isMy;
-  if (toggleHiddenBtn)  toggleHiddenBtn.hidden = !isMy;
+  if (addBtn)           addBtn.hidden = !isMy || _profilePickerContext === 'recipe';
+  if (toggleHiddenBtn) {
+    toggleHiddenBtn.hidden = !isMy;
+    toggleHiddenBtn.setAttribute('aria-pressed', String(_profilePickerShowHidden));
+    toggleHiddenBtn.innerHTML = _profilePickerShowHidden
+      ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`
+      : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+  }
   if (backBtn)          backBtn.hidden = isMy;
 }
 
@@ -6258,8 +6265,8 @@ function _renderProfilePreview(record) {
       : isHiddenMode
         ? `${detailsBtn}${eyeHideBtn}`
         : isDefault
-          ? `${useBtn}${detailsBtn}${editBtn}${eyeHideBtn}`
-          : `${useBtn}${detailsBtn}${editBtn}${_profilePickerContext !== 'recipe' ? deleteBtn : ''}`;
+          ? `${useBtn}${detailsBtn}${_profilePickerContext !== 'recipe' ? editBtn : ''}${_profilePickerContext !== 'recipe' ? eyeHideBtn : ''}`
+          : `${useBtn}${detailsBtn}${_profilePickerContext !== 'recipe' ? editBtn : ''}${_profilePickerContext !== 'recipe' ? eyeHideBtn : ''}${_profilePickerContext !== 'recipe' ? deleteBtn : ''}`;
   profilePickerPreviewEl.innerHTML = `
     <div class="profile-preview-card">
       <div class="profile-preview-header">
@@ -6411,6 +6418,8 @@ function _renderProfilePickerList() {
   } else if (isHidden) {
     list = (Array.isArray(_profileRecordsCacheAll) ? _profileRecordsCacheAll : []).filter(r => r.visibility === 'hidden');
   } else if (isCopy) {
+    list = Array.isArray(_profileRecordsCacheAll) ? _profileRecordsCacheAll : (Array.isArray(_profileRecordsCache) ? _profileRecordsCache : []);
+  } else if (_profilePickerShowHidden) {
     list = Array.isArray(_profileRecordsCacheAll) ? _profileRecordsCacheAll : (Array.isArray(_profileRecordsCache) ? _profileRecordsCache : []);
   } else {
     list = Array.isArray(_profileRecordsCache) ? _profileRecordsCache : [];
@@ -8377,6 +8386,7 @@ async function openProfilePickerModal(context = 'editor') {
   }
   try {
     _profilePickerContext = context;
+    _profilePickerShowHidden = false;
     await Promise.all([_ensureProfilesLoaded(), _loadProfileFavorites()]);
     if (profilePickerSourceEl) profilePickerSourceEl.value = 'user';
     if (profilePickerSearchEl) profilePickerSearchEl.value = '';
@@ -8756,7 +8766,12 @@ document.getElementById('btn-profile-picker-open-trash')?.addEventListener('clic
 
 
 document.getElementById('btn-profile-picker-toggle-hidden')?.addEventListener('click', () => {
-  _setProfilePickerMode('hidden');
+  _profilePickerShowHidden = !_profilePickerShowHidden;
+  if (_profilePickerShowHidden) {
+    _ensureProfilesWithHiddenLoaded().then(() => _renderProfilePickerList());
+  }
+  _updateProfilePickerToolbar();
+  _renderProfilePickerList();
 });
 
 async function _purgeSelectedProfile() {
@@ -10558,6 +10573,7 @@ function _beanManagerRenderDetail(bean) {
   }
 
   const fieldsEl = document.getElementById('bean-manager-fields');
+  if (fieldsEl) fieldsEl.classList.toggle('is-readonly', !!_beanManagerPickCallback);
   if (fieldsEl) {
     const varietyVal = Array.isArray(bean.variety) && bean.variety.length ? bean.variety.join(', ') : '';
     const altMin = Array.isArray(bean.altitude) ? (bean.altitude[0] ?? '') : '';
@@ -10744,7 +10760,9 @@ function openBeanManagerModal(pickCallback = null) {
   _beanManagerSelectedBean = null;
   _beanManagerAutoSelectId = null;
   const pickBanner = document.getElementById('bean-manager-pick-banner');
-  if (pickBanner) pickBanner.hidden = !pickCallback;
+  if (pickBanner) pickBanner.hidden = true;
+  const beanModalTitleEl = beanManagerModalEl.querySelector('.modal-title');
+  if (beanModalTitleEl) beanModalTitleEl.textContent = pickCallback ? t('beanManager.pickTitle') : t('beanList.title');
   const placeholderEl = document.getElementById('bean-manager-placeholder');
   if (placeholderEl) placeholderEl.hidden = !!pickCallback;
   document.getElementById('bean-manager-detail') && (document.getElementById('bean-manager-detail').hidden = true);
