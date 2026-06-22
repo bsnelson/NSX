@@ -8567,7 +8567,24 @@ function openWorkflowCreateModal() {
   const vsToggleCreate = document.getElementById('edit-volume-stop-toggle');
   if (vsToggleCreate) vsToggleCreate.checked = false;
   updateBeanPickerDisplay();
-  updateGrinderPickerDisplay();
+
+  const _applyAutoGrinder = (grinders) => {
+    if (grinders.length === 1) {
+      _editPickedGrinderId    = grinders[0].id;
+      _editPickedGrinderModel = grinders[0].model || '';
+    }
+    updateGrinderPickerDisplay();
+  };
+  if (_grindersCache.length > 0) {
+    _applyAutoGrinder(_grindersCache);
+  } else {
+    updateGrinderPickerDisplay();
+    fetchGrinders().then(res => {
+      const grinders = Array.isArray(res) ? res : (res?.items ?? []);
+      _grindersCache = grinders;
+      _applyAutoGrinder(grinders);
+    }).catch(() => {});
+  }
   document.getElementById('edit-profile').value = '';
   _syncProfileDisplay();
 
