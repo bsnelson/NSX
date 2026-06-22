@@ -4454,26 +4454,17 @@ function renderScheduleUI() {
 }
 
 async function syncScheduleToApi() {
-  console.log('[Schedule] syncScheduleToApi called. state:', JSON.stringify(scheduleState));
   if (!scheduleState.enabled) {
     if (scheduleState.scheduleId) {
-      console.log('[Schedule] Disabling via PUT, id:', scheduleState.scheduleId);
       try {
         await updateSchedule(scheduleState.scheduleId, { id: scheduleState.scheduleId, enabled: false });
-        console.log('[Schedule] PUT disable succeeded');
-      } catch (err) {
-        console.warn('[Schedule] PUT disable failed:', err.message);
-      }
-    } else {
-      console.log('[Schedule] Disabled and no scheduleId — nothing to do');
+      } catch {}
     }
     return;
   }
   const days = scheduleState.days.length > 0 ? scheduleState.days : [1, 2, 3, 4, 5, 6, 7];
   const time = `${pad2(scheduleState.onHour)}:${pad2(scheduleState.onMinute)}`;
-  console.log('[Schedule] Enabling. time:', time, 'days:', days, 'keepAwakeFor:', keepAwakeFor);
   if (scheduleState.scheduleId) {
-    console.log('[Schedule] Trying PUT update, id:', scheduleState.scheduleId);
     try {
       await updateSchedule(scheduleState.scheduleId, {
         id: scheduleState.scheduleId,
@@ -4482,15 +4473,12 @@ async function syncScheduleToApi() {
         enabled: true,
         keepAwakeFor: 0,
       });
-      console.log('[Schedule] PUT update succeeded');
       return;
-    } catch (err) {
-      console.warn('[Schedule] PUT update failed:', err.message, '— clearing id, falling back to POST');
+    } catch {
       scheduleState.scheduleId = null;
       saveScheduleState();
     }
   }
-  console.log('[Schedule] Trying POST create. payload:', JSON.stringify({ time, daysOfWeek: days, enabled: true, keepAwakeFor }));
   try {
     const created = await createSchedule({
       time,
@@ -4498,11 +4486,9 @@ async function syncScheduleToApi() {
       enabled: true,
       keepAwakeFor: 0,
     });
-    console.log('[Schedule] POST create succeeded. response:', JSON.stringify(created));
     scheduleState.scheduleId = created?.id || null;
     saveScheduleState();
   } catch (err) {
-    console.error('[Schedule] POST create failed:', err.message);
     showToast(t('toast.scheduleFailed') + ': ' + err.message);
   }
 }
