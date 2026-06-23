@@ -98,6 +98,8 @@ const {
   updateActiveWorkflowCardHistoricalValues,
   renderHistoryAccordion,
   updateHistoryShotDuration,
+  updateRecipeRating,
+  setOnRecipesRendered,
   setWorkflowSyncState,
 } = window.NSXUI || {};
 
@@ -290,7 +292,7 @@ function hasActiveFilters() {
 }
 
 function getDisplayWorkflows() {
-  if (!workflowSearchQuery && !hasActiveFilters()) return workflowItems;
+  if (!workflowSearchQuery && !hasActiveFilters()) return workflowItems.map(_attachRecipeRating);
   const q = workflowSearchQuery ? workflowSearchQuery.toLowerCase() : null;
   return workflowItems.reduce((acc, w, i) => {
     if (q) {
@@ -302,7 +304,7 @@ function getDisplayWorkflows() {
     if (workflowFilters.beans.size > 0    && !workflowFilters.beans.has(w.coffeeName))       return acc;
     if (workflowFilters.grinders.size > 0 && !workflowFilters.grinders.has(w.grinderModel))  return acc;
     if (workflowFilters.profiles.size > 0 && !workflowFilters.profiles.has(w.profileTitle))  return acc;
-    acc.push({ ...w, _origIdx: i });
+    acc.push(_attachRecipeRating({ ...w, _origIdx: i }));
     return acc;
   }, []);
 }
@@ -821,18 +823,34 @@ function buildWorkflowItemsFromShots(shotItems) {
     const latestTimestamp = Number.isFinite(timestamp) ? timestamp : 0;
     const existing = grouped.get(key);
 
+    const rv = Number(shot?.annotations?.enjoyment ?? shot?.metadata?.rating);
+    const prevMax = existing?.ratingMax ?? null;
+    const prevCount = existing?.ratingCount ?? 0;
+    const ratingCount = Number.isFinite(rv) ? prevCount + 1 : prevCount;
+    const ratingMax = Number.isFinite(rv) ? (prevMax === null ? rv : Math.max(prevMax, rv)) : prevMax;
+
     if (!existing || latestTimestamp >= existing.latestTimestamp) {
       grouped.set(key, {
         ...mapped,
         latestTimestamp,
         gatewayWorkflow: shot?.workflow || null,
+        ratingMax,
+        ratingCount,
       });
+    } else {
+      existing.ratingMax = ratingMax;
+      existing.ratingCount = ratingCount;
     }
   }
 
   return Array.from(grouped.values())
     .sort((a, b) => b.latestTimestamp - a.latestTimestamp)
-    .map(({ latestTimestamp, ...item }) => item);
+    .map(({ latestTimestamp, ratingMax, ratingCount, ...item }) => {
+      const cached = _recipeRatingCache.get(getWorkflowKey(item));
+      item.maxRating  = cached ? cached.max   : (ratingMax ?? null);
+      item.ratedCount = cached ? cached.count : (ratingCount || 0);
+      return item;
+    });
 }
 
 
@@ -4943,6 +4961,67 @@ async function _loadMoreHistory() {
   renderHistory();
 }
 
+const _recipeRatingCache = new Map(); // key: getWorkflowKey → { max:number|null, count:number }
+
+function _computeMaxRating(shotList) {
+  let max = null, count = 0;
+  for (const s of shotList || []) {
+    const r = Number(s?.annotations?.enjoyment ?? s?.metadata?.rating);
+    if (Number.isFinite(r)) { count++; if (max === null || r > max) max = r; }
+  }
+  return { max, count };
+}
+
+async function _fetchAllRecipeShots(params) {
+  const all = [];
+  let offset = 0;
+  const pageLimit = 200;
+  while (true) {
+    const res = await fetchShots({ ...params, limit: pageLimit, offset });
+    const items = Array.isArray(res?.items) ? res.items : [];
+    all.push(...items);
+    const total = Number.isFinite(res?.total) ? res.total : all.length;
+    offset += items.length;
+    if (items.length === 0 || all.length >= total) break;
+  }
+  return all;
+}
+
+function _attachRecipeRating(w) {
+  const key = getWorkflowKey(w);
+  const cached = _recipeRatingCache.get(key);
+  const approx = cached ?? _computeMaxRating(findShotsForWorkflow(w));
+  w.maxRating  = cached ? cached.max   : approx.max;
+  w.ratedCount = cached ? cached.count : approx.count;
+  return w;
+}
+
+function _loadRecipeRatings(recipes) {
+  for (const r of recipes || []) {
+    const key = getWorkflowKey(r);
+    if (_recipeRatingCache.has(key)) {
+      const c = _recipeRatingCache.get(key);
+      updateRecipeRating?.(key, c.max, c.count);
+      continue;
+    }
+    const params = {};
+    if (r.coffeeName    && r.coffeeName    !== '—') params.coffeeName    = r.coffeeName;
+    if (r.coffeeRoaster && r.coffeeRoaster !== '—') params.coffeeRoaster = r.coffeeRoaster;
+    if (r.grinderModel  && r.grinderModel  !== '—') params.grinderModel  = r.grinderModel;
+    if (r.profileTitle  && r.profileTitle  !== '—') params.profileTitle  = r.profileTitle;
+    _fetchAllRecipeShots(params)
+      .then(items => {
+        const matched = items.filter(s => getWorkflowKey(mapShotToWorkflow(s)) === key);
+        const { max, count } = _computeMaxRating(matched);
+        _recipeRatingCache.set(key, { max, count });
+        updateRecipeRating?.(key, max, count);
+      })
+      .catch(() => {});
+  }
+}
+
+setOnRecipesRendered?.(() => _loadRecipeRatings(getDisplayWorkflows()));
+
 function _filterShotsByFavAndRating(shotList) {
   const { favoritesOnly, minRating } = _historyFilters;
   if (!favoritesOnly && minRating <= 0) return shotList;
@@ -4970,6 +5049,7 @@ function renderHistory() {
     selectedShots = findShotsForHistoryWorkflow(filtered[historySelectedRecipeIndex], source);
   }
   renderHistoryAccordion?.(filtered, historySelectedRecipeIndex, selectedShots);
+  _loadRecipeRatings(filtered);
   if (selectedShots) _loadHistoryShotDurations(selectedShots);
   _updateLoadMoreButton();
 }
@@ -5003,6 +5083,7 @@ document.getElementById('history-accordion-list')?.addEventListener('click', e =
         await Promise.all(recipeShotIds.map(id => deleteShotById(id)));
         shots = shots.filter(s => !recipeShotIds.includes(s.id));
         recipeShotIds.forEach(id => shotDetailsCache.delete(id));
+        _recipeRatingCache.clear();
         historySelectedRecipeIndex = -1;
         renderHistory();
         renderWorkflows(getDisplayWorkflows(), selectedWorkflowIndex);
@@ -5051,6 +5132,7 @@ async function _deleteHistoryShot(shotId) {
     await deleteShotById(shotId);
     shots = shots.filter(s => s.id !== shotId);
     shotDetailsCache.delete(shotId);
+    _recipeRatingCache.clear();
     if (historySelectedRecipeIndex >= workflowItems.length) {
       historySelectedRecipeIndex = workflowItems.length > 0 ? 0 : -1;
     }
@@ -5646,6 +5728,7 @@ document.getElementById('btn-shot-review-save')?.addEventListener('click', async
       if (shot.workflow?.context) Object.assign(shot.workflow.context, ctxPatch);
     }
     shotDetailsCache.delete(id);
+    _recipeRatingCache.clear();
     renderHistory();
     showToast(t('toast.shotSaved'));
   } catch {

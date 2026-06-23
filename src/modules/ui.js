@@ -329,7 +329,7 @@ function renderWorkflows(workflows, selectedIndex) {
               <span class="workflow-compact-value">${workflow.profileTitle}</span>
             </span>
           </div>
-          ${(workflow.ratio && workflow.ratio !== '—') || (Array.isArray(workflow.tags) && workflow.tags.length) ? `<div class="workflow-compact-ratio-tags">${workflow.ratio && workflow.ratio !== '—' ? `<span class="workflow-compact-ratio">(${workflow.ratio})</span>` : ''}${Array.isArray(workflow.tags) && workflow.tags.length ? workflow.tags.map(tag => `<span class="workflow-compact-tag">${tag}</span>`).join('') : ''}</div>` : ''}
+          <div class="workflow-compact-ratio-tags">${workflow.ratio && workflow.ratio !== '—' ? `<span class="workflow-compact-ratio">(${workflow.ratio})</span>` : ''}${Array.isArray(workflow.tags) && workflow.tags.length ? workflow.tags.map(tag => `<span class="workflow-compact-tag">${tag}</span>`).join('') : ''}${_renderRecipeRating(_recipeKey(workflow), workflow.maxRating, workflow.ratedCount)}</div>
         </div>
       </div>
     </li>
@@ -337,6 +337,7 @@ function renderWorkflows(workflows, selectedIndex) {
   }).join("");
 
   updateRecipeListFade();
+  _onRecipesRendered?.();
 }
 
 const _syncDotEl = document.getElementById('home-workflow-sync');
@@ -1511,6 +1512,31 @@ function _esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function _recipeKey(w) {
+  return [w.coffeeRoaster, w.coffeeName, w.grinderModel, w.profileTitle]
+    .map(v => String(v || '—').trim().toLocaleLowerCase('de-DE')).join('||');
+}
+
+function _renderRecipeRating(key, max, count) {
+  if (!Number.isFinite(max) || !count) {
+    return `<span class="recipe-rating is-empty" data-recipe-key="${_esc(key)}"></span>`;
+  }
+  const fill = Math.round(max / 10) * 10; // nearest half-star (10% per half)
+  return `<span class="recipe-rating" data-recipe-key="${_esc(key)}" aria-label="${t('recipe.bestRating')}: ${(max/20).toFixed(1)}/5 (${count})">
+    <span class="rating-stars" style="--fill:${fill}%"><span class="rating-stars-bg">★★★★★</span><span class="rating-stars-fg">★★★★★</span></span>
+    <span class="rating-count">(${count})</span>
+  </span>`;
+}
+
+function updateRecipeRating(key, max, count) {
+  document.querySelectorAll('.recipe-rating').forEach(el => {
+    if (el.dataset.recipeKey === key) el.outerHTML = _renderRecipeRating(key, max, count);
+  });
+}
+
+let _onRecipesRendered = null;
+function setOnRecipesRendered(fn) { _onRecipesRendered = fn; }
+
 function _renderShotRows(shots) {
   if (!Array.isArray(shots) || shots.length === 0) {
     return `<li class="history-shot-empty">${t('history.noShots')}</li>`;
@@ -1605,6 +1631,7 @@ function renderHistoryAccordion(recipes, selectedIndex, selectedShots) {
               </span>
             </div>
           </div>
+          ${_renderRecipeRating(_recipeKey(r), r.maxRating, r.ratedCount)}
           ${_chevronSvg}
         </div>
         ${shotsSection}
@@ -1645,6 +1672,8 @@ window.NSXUI = {
   updateActiveWorkflowCardHistoricalValues,
   renderHistoryAccordion,
   updateHistoryShotDuration,
+  updateRecipeRating,
+  setOnRecipesRendered,
   setSeriesVisibility,
   renderShotAnalysis,
   setWorkflowSyncState,

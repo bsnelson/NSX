@@ -4564,6 +4564,10 @@ html, body {
   gap: 4px;
   margin-top: 4px;
 }
+/* Hide the row entirely when its only content is an empty (unrated) rating widget */
+.workflow-compact-ratio-tags:not(:has(> :not(.recipe-rating.is-empty))) {
+  display: none;
+}
 .workflow-compact-ratio-tags .workflow-compact-ratio {
   margin-right: 6px;
 }
@@ -4575,6 +4579,42 @@ html, body {
   border-radius: 20px;
   padding: 2px 7px;
   white-space: nowrap;
+}
+
+/* ── Recipe Best-Rating Stars (shared: recipe cards + history) ── */
+.recipe-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.recipe-rating.is-empty {
+  margin-left: auto;
+}
+.rating-stars {
+  position: relative;
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+.rating-stars-bg {
+  color: rgba(255, 255, 255, 0.18);
+}
+.rating-stars-fg {
+  position: absolute;
+  inset: 0;
+  width: var(--fill, 0%);
+  overflow: hidden;
+  white-space: nowrap;
+  color: #FFD60A;
+}
+.rating-count {
+  font-size: var(--fs-card-label);
+  color: var(--c-label-3);
+}
+[data-theme="white"] .rating-stars-bg {
+  color: rgba(0, 0, 0, 0.18);
 }
 
 .workflow-grinder,
@@ -8895,6 +8935,13 @@ html, body {
 }
 
 .history-accordion-header:active { opacity: 0.72; }
+
+/* Reserve a consistent slot for the rating so the chevron aligns across rated and unrated recipes */
+.history-accordion-header .recipe-rating {
+  min-width: 96px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
 
 .history-accordion-meta {
   flex: 1;
