@@ -1079,8 +1079,10 @@ async function _pushCurrentSkinStateToMachine(bypassStateCheck = false) {
       const payload = await _buildRecipeGatewayPayload(workflow);
       if (nonce !== _workflowPushNonce) return;
       await pushWorkflow(payload);
+      setWorkflowSyncState?.('synced');
     } catch (err) {
       console.warn('Rezept-Sync fehlgeschlagen:', err?.message);
+      setWorkflowSyncState?.('error');
     }
   }
   try {
