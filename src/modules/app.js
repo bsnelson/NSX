@@ -10649,6 +10649,10 @@ function _beanManagerSelectBean(bean) {
 }
 
 function _beanManagerSuggestions(field) {
+  // Name is unique per bean and notes are free-form flavour combinations
+  // (e.g. "Schokoladig, Nussig, Beerig") that practically never repeat verbatim,
+  // so suggestions add no value there — open a plain text field instead.
+  if (field === 'name' || field === 'notes') return [];
   const fromBeans = (key) => [...new Set(_beanManagerAllBeans.map(b => b[key]).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
   if (field === 'variety') {
     return [...new Set(_beanManagerAllBeans.flatMap(b => Array.isArray(b.variety) ? b.variety : []).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
@@ -10821,7 +10825,10 @@ async function _beanManagerLoadBatches(beanId) {
   if (!listEl) return;
   listEl.innerHTML = `<div class="batch-empty">${t('status.loading')}</div>`;
   try {
-    const batches = await fetchBatches(beanId, _beanManagerShowArchivedBatches);
+    // Always load every batch (incl. archived) so "add batch" can prefill from the
+    // latest batch even when all previous ones are archived; the list view hides
+    // archived batches itself in _beanManagerRenderBatches().
+    const batches = await fetchBatches(beanId, true);
     const items = Array.isArray(batches) ? batches : (batches?.items ?? []);
     _beanManagerRenderBatches(items);
   } catch {
@@ -10903,8 +10910,9 @@ async function _beanManagerLoad() {
   const listEl = document.getElementById('bean-manager-list');
   if (listEl) listEl.innerHTML = `<div class="bohnen-empty-state bean-manager-empty">${t('status.loading')}</div>`;
   try {
-    const includeArchived = _beanManagerShowArchived;
-    const data = await fetchBeans(includeArchived);
+    // Always load every bean (incl. archived) so autocomplete suggestions draw
+    // from all beans; the list view hides archived ones via _beanManagerFilteredBeans().
+    const data = await fetchBeans(true);
     _beanManagerAllBeans = Array.isArray(data) ? data : (data?.items ?? []);
     if (_beanManagerSelectedBean) {
       _beanManagerSelectedBean = _beanManagerAllBeans.find(b => b.id === _beanManagerSelectedBean.id) ?? null;
