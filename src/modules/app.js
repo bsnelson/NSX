@@ -1029,7 +1029,12 @@ async function _buildRecipeGatewayPayload(workflow) {
   }
 
   const tags = Array.isArray(workflow.tags) ? workflow.tags : [];
+  const workflowName = [workflow.coffeeRoaster, workflow.coffeeName, resolvedProfile?.title || workflow.profileTitle]
+    .map(v => String(v || '').trim())
+    .filter(v => v && v !== '—')
+    .join(' · ') || '—';
   const payload = {
+    name: workflowName,
     profile: resolvedProfile,
     profileId,
     context: {
