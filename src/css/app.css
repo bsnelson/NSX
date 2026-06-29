@@ -10985,8 +10985,8 @@ html, body {
 
 .workflow-dose-pill {
   position: absolute;
-  top: -14px;
-  left: 50%;
+  top: 0px;
+  left: -20%;
   transform: translateX(-50%);
   min-width: 18px;
   padding: 1px 6px;
