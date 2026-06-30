@@ -2108,6 +2108,16 @@ window.addEventListener("scale:weight", (event) => {
       dosePill.textContent = '';
     }
   }
+  const sbwPill = document.getElementById('workflow-sbw-pill');
+  if (sbwPill) {
+    const sbwWidget = document.getElementById('workflow-sbw-widget');
+    const pitcher = pitcherPresets[activePitcherIndex];
+    if (scaleConnected && sbwWidget && !sbwWidget.hidden && pitcher?.pitcherWeight != null) {
+      sbwPill.textContent = `${(newWeight - pitcher.pitcherWeight).toFixed(1)}g`;
+    } else {
+      sbwPill.textContent = '';
+    }
+  }
   updateEspressoFullscreen();
   if (currentMachineState === 'hotWater' && !_hotWaterDone) {
     const dispensed = Math.max(0, newWeight - _hotWaterStartWeight);

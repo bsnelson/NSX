@@ -2924,8 +2924,10 @@ html, body {
   border: 1px solid var(--c-separator);
   color: var(--c-label-2);
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 1px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   backdrop-filter: blur(10px);
@@ -2941,6 +2943,8 @@ html, body {
   filter: brightness(0) invert(1);
   opacity: 0.7;
   display: block;
+  width: 22px;
+  height: 22px;
 }
 
 .workflow-sbw-btn.is-ready .workflow-sbw-icon {
@@ -10984,27 +10988,24 @@ html, body {
   position: relative;
 }
 
-.workflow-dose-pill {
-  position: absolute;
-  top: 0px;
-  left: -20%;
-  transform: translateX(-50%);
-  min-width: 18px;
-  padding: 1px 6px;
-  border-radius: 10px;
-  background: var(--c-bg-4);
-  border: 1px solid var(--c-separator);
-  color: var(--c-label);
-  font-size: 12px;
+.workflow-dose-pill,
+.workflow-sbw-pill {
+  font-size: 11px;
   font-weight: 700;
-  line-height: 1.4;
+  line-height: 1;
+  color: var(--c-label);
+  letter-spacing: -0.02em;
   text-align: center;
-  letter-spacing: -0.01em;
   pointer-events: none;
   white-space: nowrap;
 }
-.workflow-dose-pill:empty {
+.workflow-dose-pill:empty,
+.workflow-sbw-pill:empty {
   display: none;
+}
+.workflow-dose-btn.is-active .workflow-dose-pill,
+.workflow-sbw-btn.is-active .workflow-sbw-pill {
+  color: var(--c-blue);
 }
 
 .workflow-dose-widget[hidden] {
@@ -11015,8 +11016,8 @@ html, body {
   opacity: 0.7;
   filter: brightness(0) invert(1);
   display: block;
-  width: 32px;
-  height: 32px;
+  width: 22px;
+  height: 22px;
 }
 
 .workflow-dose-btn.is-active {
