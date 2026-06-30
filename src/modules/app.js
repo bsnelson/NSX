@@ -1134,6 +1134,20 @@ async function _pushCurrentSkinStateToMachine(bypassStateCheck = false) {
   }
 }
 
+// Coalesce rapid state-sync triggers (init + scale:status + devices fire together at
+// startup) into a single push, so we don't send several overlapping workflow PUTs.
+let _pushStateTimer = null;
+let _pushStateBypass = false;
+function _schedulePushCurrentSkinState(bypassStateCheck = false) {
+  _pushStateBypass = _pushStateBypass || bypassStateCheck;
+  clearTimeout(_pushStateTimer);
+  _pushStateTimer = setTimeout(() => {
+    const bypass = _pushStateBypass;
+    _pushStateBypass = false;
+    _pushCurrentSkinStateToMachine(bypass).catch(() => {});
+  }, 250);
+}
+
 let _pushDebounceTimer = null;
 
 function renderHomeRecentRecipes() {
@@ -1934,7 +1948,7 @@ async function loadApiData() {
       setCurrentWorkflow(workflowItems[selectedWorkflowIndex]);
       plotWorkflowShot(workflowItems[selectedWorkflowIndex]);
       if (canExecuteOperation('setWorkflow')) {
-        _pushCurrentSkinStateToMachine().catch(() => {});
+        _schedulePushCurrentSkinState();
       }
     } else {
       setCurrentWorkflow(null);
@@ -2046,7 +2060,7 @@ window.addEventListener("scale:status", (event) => {
   if (toggle) toggle.checked = scaleConnected;
   const scalePill = document.getElementById('workflow-scale-pill');
   if (scalePill && !scaleConnected) scalePill.textContent = '';
-  if (scaleConnected !== wasConnected) _pushCurrentSkinStateToMachine();
+  if (scaleConnected !== wasConnected) _schedulePushCurrentSkinState();
 });
 
 window.addEventListener("gateway:devices", (event) => {
@@ -2989,7 +3003,7 @@ homeWorkflowWidget?.addEventListener('keydown', e => {
       const current = workflowItems[selectedWorkflowIndex];
       if (current) {
         setCurrentWorkflow?.(current);
-        _pushCurrentSkinStateToMachine(true);
+        _schedulePushCurrentSkinState(true);
       }
     }
   }
@@ -3246,7 +3260,7 @@ if (powerToggleEl) {
       await setMachineState(targetState);
       setMachineStateText(targetState);
       if (targetState === 'idle') {
-        _pushCurrentSkinStateToMachine(true).catch(() => {});
+        _schedulePushCurrentSkinState(true);
       }
     } catch (err) {
       window.NSXScreensaver?.clearSuppressions();
@@ -4360,7 +4374,7 @@ async function hydrateUiSettingsFromStore() {
     window.NSXScreensaver?.setUnlockCallback(() => {
       if (storeSettings.nsx_wake_on_unlock !== false && currentMachineState === 'sleeping') {
         setMachineState('idle')
-          .then(() => _pushCurrentSkinStateToMachine(true))
+          .then(() => _schedulePushCurrentSkinState(true))
           .catch(() => {});
       }
     });

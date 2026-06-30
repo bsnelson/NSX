@@ -68,10 +68,14 @@
     ssDimEl.style.opacity = String(o);
   }
 
+  let _wakeLockHeld = null; // null = unknown; only POST/DELETE when the desired state changes
   function syncWakeLock() {
     const wantLock = ssActive ? ssWakeLockLocked : ssWakeLockNormal;
-    if (wantLock) requestWakeLockOverride?.().catch(() => {});
-    else releaseWakeLockOverride?.().catch(() => {});
+    if (wantLock === _wakeLockHeld) return;       // dedupe: avoid redundant wakelock requests
+    _wakeLockHeld = wantLock;
+    const onErr = () => { _wakeLockHeld = null; }; // allow retry if the request failed
+    if (wantLock) requestWakeLockOverride?.().catch(onErr);
+    else releaseWakeLockOverride?.().catch(onErr);
   }
 
   function show(animateSlideReset = false, animateOverlay = false) {
