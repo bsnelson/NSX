@@ -961,40 +961,42 @@ function workflowToGatewayPayload(workflow) {
 
 async function _buildRecipeGatewayPayload(workflow) {
   const title = String(workflow?.profileTitle || '').trim();
+  const storedProfileId = String(workflow?.selectedProfileId || '').trim();
+  const expectedProfile = Boolean(storedProfileId || (title && title !== '—'));
   let profileObj = null;
   let profileId  = null;
 
-  const storedProfileId = String(workflow?.selectedProfileId || '').trim();
-  if (storedProfileId || (title && title !== '—')) {
-    try {
-      const records = await _ensureProfilesLoaded();
-      const match =
-        (storedProfileId && records.find(r => String(r.id || '') === storedProfileId)) ||
-        (title && title !== '—' && (
-          records.find(r => _isUserOwnedProfile(r) && String(r.profile?.title || '').trim() === title) ||
-          records.find(r => String(r.profile?.title || '').trim() === title)
-        ));
-      if (match) {
-        // If the matched profile is a built-in or the user has since edited their
-        // own copy (giving it a new ID), prefer the user-owned profile with the
-        // same title that has the highest version number.
-        const matchTitle = String(match.profile?.title || '').trim();
-        const userCopies = matchTitle
-          ? records.filter(r =>
-              _isUserOwnedProfile(r) &&
-              String(r.profile?.title || '').trim() === matchTitle
-            )
-          : [];
-        const bestUserCopy = userCopies.length
-          ? userCopies.reduce((best, r) =>
-              (Number(r.profile?.version) || 0) > (Number(best.profile?.version) || 0) ? r : best
-            )
-          : null;
-        const effective = bestUserCopy || match;
-        profileObj = effective.profile;
-        profileId  = effective.id ?? null;
-      }
-    } catch { /* fall through to title-only */ }
+  const matchFrom = (records) => {
+    const match =
+      (storedProfileId && records.find(r => String(r.id || '') === storedProfileId)) ||
+      (title && title !== '—' && (
+        records.find(r => _isUserOwnedProfile(r) && String(r.profile?.title || '').trim() === title) ||
+        records.find(r => String(r.profile?.title || '').trim() === title)
+      ));
+    if (!match) return false;
+    // Prefer the user-owned copy with the same title and the highest version number.
+    const matchTitle = String(match.profile?.title || '').trim();
+    const userCopies = matchTitle
+      ? records.filter(r => _isUserOwnedProfile(r) && String(r.profile?.title || '').trim() === matchTitle)
+      : [];
+    const bestUserCopy = userCopies.length
+      ? userCopies.reduce((best, r) => (Number(r.profile?.version) || 0) > (Number(best.profile?.version) || 0) ? r : best)
+      : null;
+    const effective = bestUserCopy || match;
+    profileObj = effective.profile;
+    profileId  = effective.id ?? null;
+    return true;
+  };
+
+  if (expectedProfile) {
+    try { matchFrom(await _ensureProfilesLoaded()); } catch { /* fall through */ }
+    // If the cache was empty/stale (e.g. right after wake), force a fresh load and retry once.
+    if (!profileObj) {
+      try { matchFrom(await _ensureProfilesLoaded(true)); } catch { /* fall through */ }
+    }
+    // Refuse to push a frameless profile — it would start the shot then immediately
+    // stop it (and the gateway records nothing). Signal failure to the caller instead.
+    if (!profileObj) return null;
   }
 
   let resolvedProfile;
@@ -1048,6 +1050,11 @@ async function _buildRecipeGatewayPayload(workflow) {
       ...(workflow.beanBatchId ? { beanBatchId: workflow.beanBatchId } : {}),
       extras: tags.length > 0 ? { tags } : null,
     },
+    // Bundle the machine-function settings into the same atomic workflow update so the
+    // gateway applies them in ONE PUT (instead of 4 racing PUTs that get "Queue Cancelled").
+    steamSettings: { targetTemperature: _steamEnabled ? steamTemp : 0, flow: _steamEnabled ? steamFlow : 0, duration: steamDuration },
+    hotWaterData:  { targetTemperature: hotwaterTemp, volume: hotwaterVolume },
+    rinseData:     { flow: flushFlow, duration: flushDuration },
   };
 
   workflow._resolvedPayload = payload;
@@ -1067,6 +1074,12 @@ async function pushSelectedWorkflowToMachine(workflow) {
   try {
     const payload = await _buildRecipeGatewayPayload(workflow);
     if (nonce !== _workflowPushNonce) return;
+    if (!payload) {
+      // Profile could not be resolved — don't push an invalid (frameless) profile.
+      setWorkflowSyncState?.('error');
+      showToast(t('toast.recipeNotSet'));
+      return;
+    }
     await pushWorkflow({ context: { extras: null } });
     if (nonce !== _workflowPushNonce) return;
     await pushWorkflow(payload);
@@ -1084,17 +1097,26 @@ async function _pushCurrentSkinStateToMachine(bypassStateCheck = false) {
   if (!bypassStateCheck && !canExecuteOperation('setWorkflow')) return;
   const workflow = workflowItems[selectedWorkflowIndex];
   if (workflow) {
+    // The recipe payload already bundles steam/hotwater/flush → a single atomic PUT.
     const nonce = ++_workflowPushNonce;
     try {
       const payload = await _buildRecipeGatewayPayload(workflow);
       if (nonce !== _workflowPushNonce) return;
-      await pushWorkflow(payload);
-      setWorkflowSyncState?.('synced');
+      if (payload) {
+        await pushWorkflow(payload);
+        setWorkflowSyncState?.('synced');
+      } else {
+        // Profile unresolved — leave the machine's current profile untouched rather
+        // than overwriting it with an invalid (frameless) one.
+        setWorkflowSyncState?.('error');
+      }
     } catch (err) {
       console.warn('Rezept-Sync fehlgeschlagen:', err?.message);
       setWorkflowSyncState?.('error');
     }
+    return;
   }
+  // No recipe selected — still sync the standalone machine-function settings.
   try {
     await pushSteamSettings(_steamEnabled ? steamTemp : 0, _steamEnabled ? steamFlow : 0);
   } catch (err) {
@@ -4861,7 +4883,10 @@ function _loadRecipeRatings(recipes) {
   }
 }
 
-setOnRecipesRendered?.(() => _loadRecipeRatings(getDisplayWorkflows()));
+// Recipe cards show the instant rating approximation from already-loaded shots
+// (via _attachRecipeRating) — free. The authoritative per-recipe shot fetch is
+// deferred to when the History tab is opened (see renderHistory) to avoid a burst
+// of /shots requests at startup.
 
 function _filterShotsByFavAndRating(shotList) {
   const { favoritesOnly, minRating } = _historyFilters;
@@ -4890,7 +4915,9 @@ function renderHistory() {
     selectedShots = findShotsForHistoryWorkflow(filtered[historySelectedRecipeIndex], source);
   }
   renderHistoryAccordion?.(filtered, historySelectedRecipeIndex, selectedShots);
-  _loadRecipeRatings(filtered);
+  // Only fetch authoritative per-recipe ratings when the History tab is actually
+  // shown — avoids a burst of /shots requests during the startup pre-render.
+  if (window._currentTabIndex === 2) _loadRecipeRatings(filtered);
   if (selectedShots) _loadHistoryShotDurations(selectedShots);
   _updateLoadMoreButton();
 }
@@ -5889,22 +5916,27 @@ function _normalizeProfileRecord(raw) {
 
 async function _ensureProfilesLoaded(force = false) {
   if (!fetchProfiles) return [];
-  if (_profileRecordsCache && !force) return _profileRecordsCache;
+  if (_profileRecordsCache?.length && !force) return _profileRecordsCache;
   const data = await fetchProfiles();
   const list = Array.isArray(data) ? data : (data?.items ?? data?.records ?? []);
-  _profileRecordsCache = list
+  const records = list
     .map(_normalizeProfileRecord)
     .filter(Boolean)
     .filter(r => r.profile);
-  return _profileRecordsCache;
+  // Never cache an empty result: the gateway can transiently return no profiles
+  // (e.g. just after wake while it re-initializes). Caching [] would persist a
+  // broken state — every recipe push would then send a frameless profile.
+  if (records.length) _profileRecordsCache = records;
+  return records;
 }
 
 async function _ensureProfilesWithHiddenLoaded(force = false) {
-  if (_profileRecordsCacheAll && !force) return _profileRecordsCacheAll;
+  if (_profileRecordsCacheAll?.length && !force) return _profileRecordsCacheAll;
   const data = await fetchProfilesIncludingHidden();
   const list = Array.isArray(data) ? data : (data?.items ?? data?.records ?? []);
-  _profileRecordsCacheAll = list.map(_normalizeProfileRecord).filter(Boolean).filter(r => r.profile);
-  return _profileRecordsCacheAll;
+  const records = list.map(_normalizeProfileRecord).filter(Boolean).filter(r => r.profile);
+  if (records.length) _profileRecordsCacheAll = records;
+  return records;
 }
 
 async function _ensureDeletedProfilesLoaded(force = false) {
