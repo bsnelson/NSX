@@ -696,16 +696,12 @@ function renderShotDiffCard(reserveEl, diffRows) {
   }
 }
 
-function renderShotAnalysis(listEl, normalized) {
-  const containerEl = listEl;
-  if (!containerEl) return;
-  containerEl.querySelectorAll('.shot-analysis-row').forEach(el => el.remove());
-
+function renderShotAnalysis(normalized) {
   const elapsed   = normalized?.elapsed   || [];
   const pressure  = normalized?.pressure  || [];
   const flow      = normalized?.flow      || [];
   const substates = normalized?.substates || [];
-  if (!elapsed.length) return;
+  if (!elapsed.length) return [];
 
   // Split samples into preinfusion vs extraction by substate
   const preinfusionIdx = new Set();
@@ -768,12 +764,7 @@ function renderShotAnalysis(listEl, normalized) {
     if (avgF != null) rows.push({ label: t('analysis.avgFlow'),     value: `${avgF.toFixed(1)} ml/s` });
   }
 
-  rows.forEach(r => {
-    const row = document.createElement('div');
-    row.className = 'bean-field-row shot-analysis-row';
-    row.innerHTML = `<span class="bean-field-label">${r.label}</span><span class="bean-field-static">${r.value}</span>`;
-    containerEl.appendChild(row);
-  });
+  return rows;
 }
 
 function _extractProfileFramesForShot(shot) {
@@ -1544,11 +1535,14 @@ function _renderShotRows(shots) {
   return shots.map(shot => {
     const ctx    = shot?.workflow?.context || {};
     const grind  = ctx.grinderSetting ?? '—';
-    const dose   = Number(ctx.targetDoseWeight || 0);
     const ann    = shot.annotations ?? {};
-    const actualYield = ann.extras?.virtualScale === true ? (ann.extras?.actualYield ?? null) : null;
-    const yield_ = actualYield != null ? actualYield : Number(ctx.targetYield || 0);
-    const yieldLabel = actualYield != null ? `~${Math.round(yield_)}g` : `${yield_}g`;
+    // Actual shot values: actual dose / actual yield from annotations, recipe target as fallback.
+    const dose   = Number(ann.actualDoseWeight ?? ctx.targetDoseWeight ?? 0);
+    const annYield = Number(ann.actualYield ?? ann.extras?.actualYield);
+    const hasActualYield = Number.isFinite(annYield) && annYield > 0;
+    const isEstYield = hasActualYield && ann.extras?.virtualScale === true && !(Number(ann.actualYield) > 0);
+    const yield_ = hasActualYield ? annYield : Number(ctx.targetYield || 0);
+    const yieldLabel = isEstYield ? `~${Math.round(yield_)}g` : `${yield_}g`;
     const doseYield = dose > 0 && yield_ > 0
       ? `${dose}g → ${yieldLabel} (1:${(yield_ / dose).toFixed(1)})`
       : '—';

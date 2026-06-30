@@ -1377,10 +1377,17 @@ function plotWorkflowShot(workflow, requestedIndex, _retrying = false) {
         } : undefined,
       };
 
-      // API never returns annotations; merge from in-memory list shot if available
-      const shotForGraph = shot.annotations
-        ? { ...fullShot, annotations: shot.annotations }
-        : fullShot;
+      // API never returns annotations, and the re-fetched fullShot can lag behind an
+      // edit (dose/yield etc.) that lives on the in-memory list shot — merge both so the
+      // date-picker meta reflects the latest edit.
+      const shotForGraph = {
+        ...fullShot,
+        ...(shot.annotations ? { annotations: shot.annotations } : {}),
+        workflow: {
+          ...(fullShot.workflow || {}),
+          context: { ...(fullShot.workflow?.context || {}), ...(shot.workflow?.context || {}) },
+        },
+      };
       renderShotGraph(graphEl, shotForGraph, workflow, undefined, navContext, diffRows, normalizeShotData);
       _updateScaleIndicatorVisibility();
 
@@ -5339,19 +5346,8 @@ window.addEventListener('router:tabchange', e => {
 const shotReviewModalEl  = document.getElementById('shot-review-modal');
 const shotReviewTitleEl  = document.getElementById('shot-review-title');
 const shotReviewGraphEl  = document.getElementById('shot-review-graph');
-const shotReviewRoasterEl   = document.getElementById('shot-review-roaster');
-const shotReviewBeanEl      = document.getElementById('shot-review-bean');
-const shotReviewRoastDateEl = document.getElementById('shot-review-roast-date');
-const shotReviewGrinderEl   = document.getElementById('shot-review-grinder');
-const shotReviewGrindEl     = document.getElementById('shot-review-grind');
-const shotReviewDoseEl      = document.getElementById('shot-review-dose');
-const shotReviewProfileEl   = document.getElementById('shot-review-profile');
-const shotReviewTemperatureEl = document.getElementById('shot-review-temperature');
-const shotReviewTargetWeightEl = document.getElementById('shot-review-target-weight');
-const shotReviewDurationEl  = document.getElementById('shot-review-duration');
-const shotReviewYieldEl     = document.getElementById('shot-review-yield');
-const shotReviewTdsEl       = document.getElementById('shot-review-tds');
-const shotReviewEyEl        = document.getElementById('shot-review-ey');
+const shotReviewRecipeGridEl  = document.getElementById('shot-review-recipe-grid');
+const shotReviewResultsGridEl = document.getElementById('shot-review-results-grid');
 const shotReviewRatingEl    = document.getElementById('shot-review-rating');
 const shotReviewRatingValEl = document.getElementById('shot-review-rating-val');
 const shotReviewRatingMaxEl = document.getElementById('shot-review-rating-max');
@@ -5395,6 +5391,68 @@ function _renderTagSuggestions(query) {
 }
 let _reviewRating  = null;
 let _reviewFav     = false;
+let _reviewDraft   = null;
+let _reviewAnalysisRows = [];
+
+function _srTile(field, label, value, { editable = true, inputMode = 'text' } = {}) {
+  const isEmpty = value === '' || value === null || value === undefined;
+  const display = isEmpty
+    ? `<span class="bean-manager-prop-empty">—</span>`
+    : _escapeHtml(String(value));
+  const inner = `<span class="bean-manager-prop-label">${_escapeHtml(label)}</span>`
+              + `<span class="bean-manager-prop-value">${display}</span>`;
+  if (!editable) {
+    return `<div class="bean-manager-prop-tile bean-manager-prop-tile--static">${inner}</div>`;
+  }
+  return `<button type="button" class="bean-manager-prop-tile" data-sr-field="${field}" data-sr-value="${_escapeHtml(String(value ?? ''))}" data-sr-inputmode="${inputMode}">${inner}</button>`;
+}
+
+function _renderShotReviewFields() {
+  const d = _reviewDraft;
+  if (!d) return;
+  if (shotReviewRecipeGridEl) {
+    const sub = (html) => `<div class="shot-review-prop-subgrid">${html}</div>`;
+    shotReviewRecipeGridEl.innerHTML =
+      sub(
+        _srTile('coffeeRoaster',    t('shotReview.roaster'),   d.coffeeRoaster) +
+        _srTile('coffeeName',       t('shotReview.bean'),      d.coffeeName) +
+        _srTile('roastDate',        t('shotReview.roastDate'), d.dispRoastDate, { editable: false }) +
+        _srTile('actualDoseWeight', t('shotReview.dose'),      d.actualDoseWeight, { inputMode: 'numeric' })
+      ) +
+      sub(
+        _srTile('grinderModel',   t('shotReview.grinder'),   d.grinderModel) +
+        _srTile('grinderSetting', t('shotReview.grindSize'), d.grinderSetting)
+      ) +
+      sub(
+        _srTile('profile',     t('shotReview.profile'),      d.dispProfile, { editable: false }) +
+        _srTile('temperature', t('shotReview.temperature'),  d.dispTemp, { editable: false }) +
+        _srTile('targetYield', t('shotReview.targetWeight'), d.targetYield, { inputMode: 'numeric' })
+      );
+  }
+  if (shotReviewResultsGridEl) {
+    // Yield label + ratio are computed at render time so the ratio tracks dose edits.
+    let yieldDisp;
+    if (d.outValue === undefined) {
+      yieldDisp = '…';
+    } else if (d.outValue === null) {
+      yieldDisp = '—';
+    } else {
+      const outStr = `${d.outEstimated ? '~' : ''}${d.outEstimated ? Math.round(d.outValue) : d.outValue.toFixed(1)} ${d.outUnit}`;
+      const dose = Number(d.actualDoseWeight);
+      const ratio = Number.isFinite(dose) && dose > 0 ? ` (1:${(d.outValue / dose).toFixed(1)})` : '';
+      yieldDisp = `${outStr}${ratio}`;
+    }
+    let html =
+      _srTile('time',     t('shotReview.time'),  d.dispDuration, { editable: false }) +
+      _srTile('yield',    t('shotReview.yield'), yieldDisp, { editable: false }) +
+      _srTile('drinkTds', 'TDS %', d.drinkTds, { inputMode: 'numeric' }) +
+      _srTile('drinkEy',  'EY %',  d.drinkEy,  { inputMode: 'numeric' });
+    for (const r of _reviewAnalysisRows) {
+      html += _srTile(null, r.label, r.value, { editable: false });
+    }
+    shotReviewResultsGridEl.innerHTML = html;
+  }
+}
 
 function _setShotReviewFav(val) {
   _reviewFav = val;
@@ -5429,36 +5487,41 @@ function openShotReview(shotId) {
     : date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   if (shotReviewTitleEl)  shotReviewTitleEl.textContent = dateStr;
-  if (shotReviewRoasterEl)   shotReviewRoasterEl.value   = ctx.coffeeRoaster  || '';
-  if (shotReviewBeanEl)      shotReviewBeanEl.value      = ctx.coffeeName     || '';
-  if (shotReviewRoastDateEl) shotReviewRoastDateEl.textContent = ctx.beanBatchId ? '…' : '—';
-  if (shotReviewGrinderEl)   shotReviewGrinderEl.value   = ctx.grinderModel   || '';
-  if (shotReviewGrindEl)     shotReviewGrindEl.value     = ctx.grinderSetting ?? '';
-  if (shotReviewDurationEl)  shotReviewDurationEl.textContent  = '…';
-  if (shotReviewYieldEl)     shotReviewYieldEl.textContent     = '…';
 
   const ann = shot.annotations ?? {};
-
-  const dose = Number(ctx.targetDoseWeight || 0);
-  if (shotReviewDoseEl) shotReviewDoseEl.value = dose > 0 ? dose : '';
-
-  const tds = ann.drinkTds ?? ann.extras?.drinkTds ?? null;
-  const ey  = ann.drinkEy  ?? ann.extras?.drinkEy  ?? null;
-  if (shotReviewTdsEl) shotReviewTdsEl.value = tds != null ? tds : '';
-  if (shotReviewEyEl)  shotReviewEyEl.value  = ey  != null ? ey  : '';
-
-  // Profile title
+  // The review edits the actual shot's dose (annotations.actualDoseWeight), the same
+  // field the date-picker meta shows; fall back to the recipe target if none recorded.
+  const measuredDose = Number(ann.actualDoseWeight);
+  const dose = Number.isFinite(measuredDose) && measuredDose > 0
+    ? measuredDose
+    : Number(ctx.targetDoseWeight || 0);
+  const tds  = ann.drinkTds ?? ann.extras?.drinkTds ?? null;
+  const ey   = ann.drinkEy  ?? ann.extras?.drinkEy  ?? null;
   const profile = shot.workflow?.profile;
   const profileTitle = profile?.title || ctx.profileTitle || '—';
-  if (shotReviewProfileEl) shotReviewProfileEl.textContent = profileTitle;
-
-  // Group temperature from profile
   const temp = _resolveProfileTemp(profile);
-  if (shotReviewTemperatureEl) shotReviewTemperatureEl.textContent = temp ? `${temp.toFixed(1)} °C` : '—';
-
-  // Target weight (number input — ratio shown in label via placeholder, not in value)
   const targetYield = Number(ctx.targetYield || profile?.target_weight || 0);
-  if (shotReviewTargetWeightEl) shotReviewTargetWeightEl.value = targetYield > 0 ? targetYield : '';
+
+  _reviewAnalysisRows = [];
+  _reviewDraft = {
+    coffeeRoaster:    ctx.coffeeRoaster || '',
+    coffeeName:       ctx.coffeeName    || '',
+    grinderModel:     ctx.grinderModel  || '',
+    grinderSetting:   (ctx.grinderSetting ?? '') === '' ? '' : String(ctx.grinderSetting),
+    actualDoseWeight: dose > 0 ? dose : null,
+    targetYield:      targetYield > 0 ? targetYield : null,
+    drinkTds:         tds != null ? Number(tds) : null,
+    drinkEy:          ey  != null ? Number(ey)  : null,
+    dispRoastDate:    ctx.beanBatchId ? '…' : '—',
+    dispProfile:      profileTitle,
+    dispTemp:         temp ? `${temp.toFixed(1)} °C` : '—',
+    dispDuration:     '…',
+    outValue:         undefined, // undefined = loading, null = no data, number = actual out
+    outUnit:          'g',
+    outEstimated:     false,
+  };
+  _renderShotReviewFields();
+
   const initRating = ann.enjoyment ?? shot.metadata?.rating ?? null;
   const initFav    = ann.extras?.favorite ?? shot.metadata?.favorite === true;
   _reviewTags = [..._getShotTags(shot)];
@@ -5485,28 +5548,33 @@ function openShotReview(shotId) {
   if (shotReviewGraphEl) shotReviewGraphEl.innerHTML = '';
   shotReviewModalEl.hidden = false;
 
-  if (ctx.beanBatchId && shotReviewRoastDateEl) {
+  if (ctx.beanBatchId) {
     fetchBatch(ctx.beanBatchId)
       .then(batch => {
+        if (_reviewShotId !== shotId || !_reviewDraft) return;
         const rd = batch?.roastDate;
         if (rd) {
           const d = new Date(rd);
           const dateStr = isNaN(d.getTime()) ? rd
             : d.toLocaleDateString(getLang?.() === 'en' ? 'en-US' : 'de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-          shotReviewRoastDateEl.textContent = `${dateStr} · ${formatBatchAge(rd)}`;
+          _reviewDraft.dispRoastDate = `${dateStr} · ${formatBatchAge(rd)}`;
         } else {
-          shotReviewRoastDateEl.textContent = '—';
+          _reviewDraft.dispRoastDate = '—';
         }
+        _renderShotReviewFields();
       })
-      .catch(() => { shotReviewRoastDateEl.textContent = '—'; });
+      .catch(() => {
+        if (_reviewShotId !== shotId || !_reviewDraft) return;
+        _reviewDraft.dispRoastDate = '—';
+        _renderShotReviewFields();
+      });
   }
 
   getShotDetailsCached(shotId)
     .then(fullShot => {
+      if (_reviewShotId !== shotId || !_reviewDraft) return;
       const secs = getShotDurationSeconds(fullShot);
-      if (shotReviewDurationEl) {
-        shotReviewDurationEl.textContent = Number.isFinite(secs) ? `${secs.toFixed(0)} s` : '—';
-      }
+      _reviewDraft.dispDuration = Number.isFinite(secs) ? `${secs.toFixed(0)} s` : '—';
 
       let actualOut = null;
       let outUnit = 'g';
@@ -5533,38 +5601,27 @@ function openShotReview(shotId) {
           if (estYield != null) { actualOut = estYield; isEstimatedOut = true; }
         }
       }
-      if (shotReviewYieldEl) {
-        const outStr = actualOut !== null ? `${isEstimatedOut ? '~' : ''}${isEstimatedOut ? Math.round(actualOut) : actualOut.toFixed(1)} ${outUnit}` : null;
-        if (outStr !== null) {
-          const ratio = dose > 0 ? ` (1:${(actualOut / dose).toFixed(1)})` : '';
-          shotReviewYieldEl.textContent = `${outStr}${ratio}`;
-        } else {
-          shotReviewYieldEl.textContent = '—';
-        }
-      }
+      _reviewDraft.outValue     = actualOut; // number or null
+      _reviewDraft.outUnit      = outUnit;
+      _reviewDraft.outEstimated = isEstimatedOut;
+
+      _reviewAnalysisRows = window.NSXUI?.renderShotAnalysis(normalizeShotData(fullShot)) || [];
+      _renderShotReviewFields();
 
       if (shotReviewGraphEl) {
         requestAnimationFrame(() => {
           renderShotGraph?.(shotReviewGraphEl, fullShot, null, undefined, null, null, normalizeShotData, 'history');
         });
       }
-
-      window.NSXUI?.renderShotAnalysis(
-        document.getElementById('shot-review-results-list'),
-        normalizeShotData(fullShot)
-      );
     })
     .catch(() => {
-      if (shotReviewDurationEl) shotReviewDurationEl.textContent = '—';
-      if (shotReviewYieldEl) {
-        const estYield = ann.extras?.virtualScale === true ? (ann.extras?.actualYield ?? null) : null;
-        if (estYield != null) {
-          const ratio = dose > 0 ? ` (1:${(estYield / dose).toFixed(1)})` : '';
-          shotReviewYieldEl.textContent = `~${Math.round(estYield)} g${ratio}`;
-        } else {
-          shotReviewYieldEl.textContent = '—';
-        }
-      }
+      if (_reviewShotId !== shotId || !_reviewDraft) return;
+      _reviewDraft.dispDuration = '—';
+      const estYield = ann.extras?.virtualScale === true ? (ann.extras?.actualYield ?? null) : null;
+      _reviewDraft.outValue     = estYield != null ? estYield : null;
+      _reviewDraft.outUnit      = 'g';
+      _reviewDraft.outEstimated = estYield != null;
+      _renderShotReviewFields();
     });
 }
 
@@ -5580,6 +5637,32 @@ shotReviewRatingEl?.addEventListener('input', () => {
 
 shotReviewFavBtn?.addEventListener('click', () => {
   _setShotReviewFav(!_reviewFav);
+});
+
+// Tap-to-edit shot-review tiles (recipe + results), like the bean manager.
+[shotReviewRecipeGridEl, shotReviewResultsGridEl].forEach(gridEl => {
+  gridEl?.addEventListener('pointerdown', (e) => {
+    const tile = e.target.closest('.bean-manager-prop-tile[data-sr-field]');
+    if (!tile || !_reviewDraft) return;
+    e.preventDefault();
+    const field     = tile.dataset.srField;
+    const inputMode = tile.dataset.srInputmode || 'text';
+    const current   = tile.dataset.srValue || '';
+    openFieldPicker(null, [], {
+      inputMode,
+      initialValue: current,
+      onConfirm: (val) => {
+        const trimmed = (val ?? '').trim();
+        if (inputMode === 'numeric') {
+          const n = parseFloat(trimmed);
+          _reviewDraft[field] = Number.isFinite(n) ? n : null;
+        } else {
+          _reviewDraft[field] = trimmed;
+        }
+        _renderShotReviewFields();
+      },
+    });
+  });
 });
 
 document.getElementById('btn-shot-review-close')?.addEventListener('click', closeShotReview);
@@ -5636,14 +5719,15 @@ document.getElementById('btn-shot-review-save')?.addEventListener('click', async
   if (!_reviewShotId) return;
   const id = _reviewShotId;
   const notes = shotReviewNotesEl?.value ?? '';
+  const d = _reviewDraft ?? {};
   const ctxPatch = {
-    coffeeRoaster:    shotReviewRoasterEl?.value.trim()  || null,
-    coffeeName:       shotReviewBeanEl?.value.trim()     || null,
-    grinderModel:     shotReviewGrinderEl?.value.trim()  || null,
-    grinderSetting:   shotReviewGrindEl?.value.trim()    || null,
-    targetDoseWeight: Number(shotReviewDoseEl?.value)    || null,
-    targetYield:      Number(shotReviewTargetWeightEl?.value) || null,
+    coffeeRoaster:    d.coffeeRoaster?.trim()   || null,
+    coffeeName:       d.coffeeName?.trim()      || null,
+    grinderModel:     d.grinderModel?.trim()    || null,
+    grinderSetting:   d.grinderSetting?.trim()  || null,
+    targetYield:      d.targetYield ?? null,
   };
+  const doseVal = d.actualDoseWeight;
   // Build full merged workflow so a top-level partial PUT doesn't drop the profile
   const cachedShot = shotDetailsCache.get(id);
   const mergedWorkflow = cachedShot
@@ -5653,12 +5737,13 @@ document.getElementById('btn-shot-review-save')?.addEventListener('click', async
   try {
     const tags = [..._reviewTags];
     const extras = { favorite: _reviewFav ?? false, tags };
-    const tdsVal = parseFloat(shotReviewTdsEl?.value);
-    const eyVal  = parseFloat(shotReviewEyEl?.value);
+    const tdsVal = d.drinkTds;
+    const eyVal  = d.drinkEy;
     const patch = {
       annotations: {
         enjoyment: _reviewRating,
         espressoNotes: notes ?? null,
+        actualDoseWeight: Number.isFinite(doseVal) ? doseVal : null,
         drinkTds: Number.isFinite(tdsVal) ? tdsVal : null,
         drinkEy:  Number.isFinite(eyVal)  ? eyVal  : null,
         extras,
@@ -5672,6 +5757,7 @@ document.getElementById('btn-shot-review-save')?.addEventListener('click', async
         ...(shot.annotations || {}),
         enjoyment: _reviewRating,
         espressoNotes: notes,
+        actualDoseWeight: Number.isFinite(doseVal) ? doseVal : (shot.annotations?.actualDoseWeight ?? null),
         drinkTds: Number.isFinite(tdsVal) ? tdsVal : (shot.annotations?.drinkTds ?? null),
         drinkEy:  Number.isFinite(eyVal)  ? eyVal  : (shot.annotations?.drinkEy  ?? null),
         extras: { ...(shot.annotations?.extras || {}), favorite: _reviewFav, tags },

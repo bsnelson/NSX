@@ -1532,66 +1532,12 @@
 
           <div class="bean-field-group">
             <div class="bean-field-group-title" data-i18n="shotReview.recipe">Rezept</div>
-            <div class="bean-field-list bean-field-list--two-col">
-              <div class="bean-field-row">
-                <span class="bean-field-label" data-i18n="shotReview.roaster">Röster</span>
-                <input type="text" id="shot-review-roaster" class="bean-field-input" autocomplete="off">
-              </div>
-              <div class="bean-field-row">
-                <span class="bean-field-label" data-i18n="shotReview.bean">Bohne</span>
-                <input type="text" id="shot-review-bean" class="bean-field-input" autocomplete="off">
-              </div>
-              <div class="bean-field-row">
-                <span class="bean-field-label" data-i18n="shotReview.roastDate">Röstdatum</span>
-                <span id="shot-review-roast-date" class="bean-field-static">—</span>
-              </div>
-              <div class="bean-field-row">
-                <span class="bean-field-label" data-i18n="shotReview.grinder">Mühle</span>
-                <input type="text" id="shot-review-grinder" class="bean-field-input" autocomplete="off">
-              </div>
-              <div class="bean-field-row">
-                <span class="bean-field-label" data-i18n="shotReview.dose">Dosis</span>
-                <input type="number" id="shot-review-dose" class="bean-field-input" min="0" step="0.1">
-              </div>
-              <div class="bean-field-row">
-                <span class="bean-field-label" data-i18n="shotReview.grindSize">Mahlgrad</span>
-                <input type="text" id="shot-review-grind" class="bean-field-input" autocomplete="off">
-              </div>
-              <div class="bean-field-row">
-                <span class="bean-field-label" data-i18n="shotReview.profile">Profil</span>
-                <span id="shot-review-profile" class="bean-field-static">—</span>
-              </div>
-              <div class="bean-field-row">
-                <span class="bean-field-label" data-i18n="shotReview.temperature">Temperatur</span>
-                <span id="shot-review-temperature" class="bean-field-static">—</span>
-              </div>
-              <div class="bean-field-row">
-                <span class="bean-field-label" data-i18n="shotReview.targetWeight">Ziel</span>
-                <input type="number" id="shot-review-target-weight" class="bean-field-input" min="0" step="0.1">
-              </div>
-            </div>
+            <div class="bean-manager-prop-grid" id="shot-review-recipe-grid"></div>
           </div>
 
           <div class="bean-field-group">
             <div class="bean-field-group-title" data-i18n="shotReview.results">Ergebnis</div>
-            <div class="bean-field-list bean-field-list--two-col" id="shot-review-results-list">
-              <div class="bean-field-row">
-                <span class="bean-field-label" data-i18n="shotReview.time">Zeit</span>
-                <span id="shot-review-duration" class="bean-field-static">—</span>
-              </div>
-              <div class="bean-field-row">
-                <span class="bean-field-label" data-i18n="shotReview.yield">Ausbeute</span>
-                <span id="shot-review-yield" class="bean-field-static">—</span>
-              </div>
-              <div class="bean-field-row">
-                <span class="bean-field-label">TDS %</span>
-                <input type="number" id="shot-review-tds" class="bean-field-input" min="0" max="20" step="0.01" placeholder="—">
-              </div>
-              <div class="bean-field-row">
-                <span class="bean-field-label">EY %</span>
-                <input type="number" id="shot-review-ey" class="bean-field-input" min="0" max="30" step="0.1" placeholder="—">
-              </div>
-            </div>
+            <div class="bean-manager-prop-grid" id="shot-review-results-grid"></div>
           </div>
 
           <div class="bean-field-group">

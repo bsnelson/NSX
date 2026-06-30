@@ -5789,6 +5789,25 @@ html, body {
   max-height: 95dvh;
 }
 
+#shot-review-results-grid {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+
+/* Recipe section: one block, tiles clustered into sub-groups placed side by side so
+   the whole section is only two rows tall (wraps on narrow screens). */
+#shot-review-recipe-grid {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: flex-start;
+  gap: 14px;
+}
+.shot-review-prop-subgrid {
+  flex: 1 1 200px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .profile-editor-title-wrap {
   display: inline-flex;
   align-items: center;
@@ -11257,6 +11276,16 @@ html, body {
 
 .bean-manager-prop-tile--split {
   cursor: default;
+}
+
+.bean-manager-prop-tile--static {
+  cursor: default;
+}
+.bean-manager-prop-tile--static:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+[data-theme="white"] .bean-manager-prop-tile--static:hover {
+  background: var(--c-fill-1);
 }
 
 .bean-manager-prop-split-row {
