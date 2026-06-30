@@ -4579,6 +4579,10 @@ html, body {
 .recipe-rating.is-empty {
   margin-left: auto;
 }
+/* Setting: hide the best-rating stars on recipe-screen cards (Interface → Recipes). */
+body.hide-recipe-card-rating #workflow-list .recipe-rating {
+  display: none;
+}
 .rating-stars {
   position: relative;
   display: inline-block;

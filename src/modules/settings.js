@@ -717,6 +717,8 @@
     sRecipes.rows.append(
       row('Open Recipe Page', 'Automatically navigate to the recipe page when tapping a recent recipe on the home screen',
         toggle(ctrl.getRecentRecipeNav?.() === true, v => ctrl.setRecentRecipeNav?.(v))),
+      row('Show Rating on Recipe Card', 'Show the best rating stars on recipe cards on the recipe screen',
+        toggle(ctrl.getShowRecipeCardRating?.() !== false, v => ctrl.setShowRecipeCardRating?.(v))),
       row('Freeze Batches', 'Show freeze button on bean batch entries',
         toggle(ctrl.getBatchFreezeEnabled?.() === true, v => ctrl.setBatchFreezeEnabled?.(v))),
     );

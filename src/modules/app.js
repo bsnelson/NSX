@@ -2807,6 +2807,12 @@ window.NSXSkinControls = {
     patchStoreSettings({ nsx_recent_recipe_nav: Boolean(v) });
   },
 
+  getShowRecipeCardRating: () => storeSettings.nsx_show_recipe_card_rating !== false,
+  setShowRecipeCardRating(v) {
+    patchStoreSettings({ nsx_show_recipe_card_rating: Boolean(v) });
+    _applyShowRecipeCardRating();
+  },
+
   getTareOnNegative: () => storeSettings.nsx_tare_on_negative !== false,
   setTareOnNegative(v) {
     patchStoreSettings({ nsx_tare_on_negative: Boolean(v) });
@@ -4425,6 +4431,7 @@ async function hydrateUiSettingsFromStore() {
     _updateSbwWidget();
     _applySbwEnabled();
     _applyRatioDoseVisible();
+    _applyShowRecipeCardRating();
     setHotwaterWidget(hotwaterTemp, hotwaterFlow, hotwaterVolume);
     updateFlushDisplay();
     renderScheduleUI();
@@ -5085,6 +5092,10 @@ let _scaledYield = null;
 function _applyRatioDoseVisible() {
   const widget = document.getElementById('workflow-dose-widget');
   if (widget) widget.hidden = !_ratioDoseEnabled;
+}
+
+function _applyShowRecipeCardRating() {
+  document.body.classList.toggle('hide-recipe-card-rating', storeSettings.nsx_show_recipe_card_rating === false);
 }
 
 function _clearDoseScaleState() {
