@@ -3433,7 +3433,10 @@ function selectSteamPreset(presetName) {
 }
 
 document.querySelectorAll('.steam-card .steam-preset-btn').forEach(btn => {
-  btn.addEventListener('click', () => selectSteamPreset(btn.dataset.preset));
+  btn.addEventListener('click', () => {
+    _clearSbwState(false); // manual preset choice supersedes auto-steam; drop its active state without reverting
+    selectSteamPreset(btn.dataset.preset);
+  });
 });
 
 /* ── Steam Settings Modal ────────────────────────────── */
@@ -5136,6 +5139,32 @@ function _updateSbwWidget() {
   btn?.classList.toggle('is-ready', hasCalib);
 }
 
+let _sbwSaved = null;
+
+function _clearSbwState(restore = true) {
+  if (_sbwSaved === null) return;
+  if (restore) {
+    activeSteamPreset = _sbwSaved.preset;
+    steamTemp     = _sbwSaved.temp;
+    steamFlow     = _sbwSaved.flow;
+    steamDuration = _sbwSaved.duration;
+    saveActivePresetName('nsx_steam_active_preset', _sbwSaved.preset ?? '');
+    _updateSteamPresetButtons();
+    _updateSteamWidget();
+    pushSteam();
+  }
+  _sbwSaved = null;
+  document.getElementById('btn-steam-by-weight')?.classList.remove('is-active');
+}
+
+function _toggleSbwPreset() {
+  if (_sbwSaved !== null) {
+    _clearSbwState(true);
+  } else {
+    _applySbwPreset();
+  }
+}
+
 function _applySbwPreset() {
   const pitcher = pitcherPresets[activePitcherIndex];
   if (!pitcher) return;
@@ -5151,10 +5180,15 @@ function _applySbwPreset() {
   }
   const milkWeight = liveWeight - pitcher.pitcherWeight;
   if (milkWeight <= 0) { showToast('Place filled pitcher on scale and tare it first'); return; }
+
+  // Remember current steam settings so a second tap can revert (toggle, like auto-dose).
+  _sbwSaved = { preset: activeSteamPreset, temp: steamTemp, flow: steamFlow, duration: steamDuration };
+
   selectSteamPreset(pitcher.steamPreset);
   const newDuration = Math.max(5, Math.round(milkWeight * calibFactor));
   steamDuration = newDuration;
   _updateSteamWidget();
+  document.getElementById('btn-steam-by-weight')?.classList.add('is-active');
   showToast(`Steam time set to ${newDuration}s for ${milkWeight.toFixed(0)}g milk`);
 }
 
@@ -5212,6 +5246,8 @@ function _applySbwPreset() {
     });
   }
 
+  let lastTouchTime = 0;
+
   // Touch
   btn.addEventListener('touchstart', e => {
     longPressTimer = setTimeout(openStrip, 400);
@@ -5224,11 +5260,12 @@ function _applySbwPreset() {
   }, { passive: true });
 
   btn.addEventListener('touchend', e => {
+    lastTouchTime = Date.now();
     clearTimeout(longPressTimer);
     if (stripOpen) {
       closeStrip(true);
     } else {
-      _applySbwPreset();
+      _toggleSbwPreset();
     }
   });
 
@@ -5238,7 +5275,9 @@ function _applySbwPreset() {
   });
 
   // Mouse (for desktop testing)
+  let mouseDownOnBtn = false;
   btn.addEventListener('mousedown', () => {
+    mouseDownOnBtn = true;
     longPressTimer = setTimeout(openStrip, 400);
   });
 
@@ -5251,7 +5290,11 @@ function _applySbwPreset() {
     clearTimeout(longPressTimer);
     if (stripOpen) {
       closeStrip(true);
+    } else if (mouseDownOnBtn && Date.now() - lastTouchTime > 600) {
+      // Plain click (not a long-press) — skip if it's an emulated event after a real touch.
+      _toggleSbwPreset();
     }
+    mouseDownOnBtn = false;
   });
 })();
 

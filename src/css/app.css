@@ -2944,13 +2944,8 @@ html, body {
 }
 
 .workflow-sbw-btn.is-ready .workflow-sbw-icon {
-  filter: brightness(0) saturate(100%) invert(47%) sepia(97%) saturate(2000%) hue-rotate(199deg) brightness(105%);
+  filter: brightness(0) invert(1);
   opacity: 1;
-}
-
-.workflow-sbw-btn.is-ready {
-  border-color: rgba(10,132,255,0.4);
-  color: var(--c-blue);
 }
 
 .workflow-sbw-pitcher-name {
@@ -11037,6 +11032,16 @@ html, body {
 [data-field="dose-yield"].is-scaled {
   color: var(--c-blue, #0a84ff);
   font-weight: 700;
+}
+
+.workflow-sbw-btn.is-active {
+  background: rgba(10,132,255,0.2);
+  border-color: rgba(10,132,255,0.4);
+}
+
+.workflow-sbw-btn.is-active .workflow-sbw-icon {
+  opacity: 1;
+  filter: brightness(0) saturate(100%) invert(47%) sepia(97%) saturate(2000%) hue-rotate(199deg) brightness(105%);
 }
 
 /* ─── Hotwater Settings Modal ────────────────────────── */
