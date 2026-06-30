@@ -1053,7 +1053,7 @@ async function _buildRecipeGatewayPayload(workflow) {
     // Bundle the machine-function settings into the same atomic workflow update so the
     // gateway applies them in ONE PUT (instead of 4 racing PUTs that get "Queue Cancelled").
     steamSettings: { targetTemperature: _steamEnabled ? steamTemp : 0, flow: _steamEnabled ? steamFlow : 0, duration: steamDuration },
-    hotWaterData:  { targetTemperature: hotwaterTemp, volume: hotwaterVolume },
+    hotWaterData:  { targetTemperature: NSXCore.getHotwaterTemp(), volume: NSXCore.getHotwaterVolume() },
     rinseData:     { flow: NSXCore.getFlushFlow(), duration: NSXCore.getFlushDuration() },
   };
 
@@ -1123,7 +1123,7 @@ async function _pushCurrentSkinStateToMachine(bypassStateCheck = false) {
     console.warn('Steam-Sync fehlgeschlagen:', err?.message);
   }
   try {
-    await pushHotwaterSettings(hotwaterTemp, hotwaterVolume);
+    await pushHotwaterSettings(NSXCore.getHotwaterTemp(), NSXCore.getHotwaterVolume());
   } catch (err) {
     console.warn('Hotwater-Sync fehlgeschlagen:', err?.message);
   }
@@ -1832,7 +1832,7 @@ function startHotWaterSession() {
   const doneEl        = document.getElementById('hotwater-done-overlay');
   if (centerEl)       centerEl.hidden = false;
   if (dispensedEl)    dispensedEl.textContent = '0';
-  if (targetLabelEl)  targetLabelEl.textContent = hotwaterVolume > 0 ? `/ ${hotwaterVolume} ml` : '/ — ml';
+  if (targetLabelEl)  targetLabelEl.textContent = NSXCore.getHotwaterVolume() > 0 ? `/ ${NSXCore.getHotwaterVolume()} ml` : '/ — ml';
   if (progressEl)     progressEl.style.strokeDashoffset = String(HW_CIRCUMFERENCE);
   if (doneEl)         doneEl.hidden = true;
   if (overlayEl)      overlayEl.hidden = false;
@@ -2132,8 +2132,8 @@ window.addEventListener("scale:weight", (event) => {
     const dispensedEl = document.getElementById('hotwater-dispensed');
     const progressEl  = document.getElementById('hotwater-ring-progress');
     if (dispensedEl) dispensedEl.textContent = dispensed.toFixed(0);
-    if (progressEl && hotwaterVolume > 0) {
-      const pct = Math.min(dispensed / hotwaterVolume, 1);
+    if (progressEl && NSXCore.getHotwaterVolume() > 0) {
+      const pct = Math.min(dispensed / NSXCore.getHotwaterVolume(), 1);
       progressEl.style.strokeDashoffset = String(HW_CIRCUMFERENCE * (1 - pct));
       if (pct >= 1) {
         _hotWaterDone = true;
@@ -3725,88 +3725,39 @@ document.getElementById('btn-steam-dur-down')?.addEventListener('click', () => {
 
 /* ── Hotwater State ───────────────────────────────────── */
 
-const HOTWATER_PRESET_DEFAULTS = {
-  klein:  { name: 'Little', temp: 80, flow: 5.0, volume: 40  },
-  mittel: { name: 'Medium', temp: 80, flow: 5.0, volume: 100 },
-  gross:  { name: 'Large',  temp: 80, flow: 5.0, volume: 150 },
-};
+/* ── Hotwater State (domain in core/domains/hotwater.js) ── */
 
-function loadHotwaterPresets() {
-  return Object.assign({}, HOTWATER_PRESET_DEFAULTS);
-}
-
-function saveHotwaterPresets(presets) {
-  patchStoreSettings({ nsx_hotwater_presets: presets });
-}
-
-let hotwaterPresets = loadHotwaterPresets();
-let activeHotwaterPreset = 'mittel';
-const _hp = hotwaterPresets[activeHotwaterPreset] ?? hotwaterPresets.mittel;
-let hotwaterTemp   = _hp.temp;
-let hotwaterFlow   = _hp.flow ?? 1.5;
-let hotwaterVolume = _hp.volume;
+NSXCore.on('hotwaterChanged', () => {
+  setHotwaterWidget(NSXCore.getHotwaterTemp(), NSXCore.getHotwaterFlow(), NSXCore.getHotwaterVolume());
+  _updateHotwaterPresetButtons();
+});
 
 function _updateHotwaterPresetButtons() {
+  const presets = NSXCore.getHotwaterPresets();
+  const active  = NSXCore.getActiveHotwaterPreset();
   document.querySelectorAll('.hotwater-card .steam-preset-btn').forEach(btn => {
     const key = btn.dataset.preset;
-    btn.textContent = hotwaterPresets[key]?.name ?? key;
-    btn.classList.toggle('is-active', key === activeHotwaterPreset);
+    btn.textContent = presets[key]?.name ?? key;
+    btn.classList.toggle('is-active', key === active);
   });
 }
 
-function _deactivateHotwaterPreset() {
-  activeHotwaterPreset = null;
-  saveActivePresetName('nsx_hotwater_active_preset', '');
-  _updateHotwaterPresetButtons();
-}
-
-function saveHotwaterState() {
-  setHotwaterWidget(hotwaterTemp, hotwaterFlow, hotwaterVolume);
-}
-
-function applyHotwaterState() {
-  saveHotwaterState();
-  pushHotwater();
-}
-
-function selectHotwaterPreset(presetName) {
-  activeHotwaterPreset = presetName;
-  saveActivePresetName('nsx_hotwater_active_preset', presetName);
-  hotwaterTemp   = hotwaterPresets[presetName].temp;
-  hotwaterFlow   = hotwaterPresets[presetName].flow ?? 1.5;
-  hotwaterVolume = hotwaterPresets[presetName].volume;
-  _updateHotwaterPresetButtons();
-  applyHotwaterState();
-}
-
 document.querySelectorAll('.hotwater-card .steam-preset-btn').forEach(btn => {
-  btn.addEventListener('click', () => selectHotwaterPreset(btn.dataset.preset));
+  btn.addEventListener('click', () => NSXCore.selectHotwaterPreset(btn.dataset.preset));
 });
 
-document.getElementById('btn-hotwater-temp-up')?.addEventListener('click', () => {
-  hotwaterTemp = Math.min(hotwaterTemp + 5, 100);
-  _deactivateHotwaterPreset(); saveHotwaterState(); pushHotwaterTemp();
-});
-document.getElementById('btn-hotwater-temp-down')?.addEventListener('click', () => {
-  hotwaterTemp = Math.max(hotwaterTemp - 5, 50);
-  _deactivateHotwaterPreset(); saveHotwaterState(); pushHotwaterTemp();
-});
-document.getElementById('btn-hotwater-flow-up')?.addEventListener('click', () => {
-  hotwaterFlow = Math.round(Math.min(hotwaterFlow + 1.0, 10.0) * 10) / 10;
-  _deactivateHotwaterPreset(); saveHotwaterState(); pushHotwaterFlow();
-});
-document.getElementById('btn-hotwater-flow-down')?.addEventListener('click', () => {
-  hotwaterFlow = Math.round(Math.max(hotwaterFlow - 1.0, 0.5) * 10) / 10;
-  _deactivateHotwaterPreset(); saveHotwaterState(); pushHotwaterFlow();
-});
-document.getElementById('btn-hotwater-vol-up')?.addEventListener('click', () => {
-  hotwaterVolume = Math.min(hotwaterVolume + 10, 500);
-  _deactivateHotwaterPreset(); saveHotwaterState(); pushHotwaterVolume();
-});
-document.getElementById('btn-hotwater-vol-down')?.addEventListener('click', () => {
-  hotwaterVolume = Math.max(hotwaterVolume - 10, 10);
-  _deactivateHotwaterPreset(); saveHotwaterState(); pushHotwaterVolume();
-});
+document.getElementById('btn-hotwater-temp-up')?.addEventListener('click', () =>
+  NSXCore.setHotwaterTemp(NSXCore.getHotwaterTemp() + 5));
+document.getElementById('btn-hotwater-temp-down')?.addEventListener('click', () =>
+  NSXCore.setHotwaterTemp(NSXCore.getHotwaterTemp() - 5));
+document.getElementById('btn-hotwater-flow-up')?.addEventListener('click', () =>
+  NSXCore.setHotwaterFlow(NSXCore.getHotwaterFlow() + 1.0));
+document.getElementById('btn-hotwater-flow-down')?.addEventListener('click', () =>
+  NSXCore.setHotwaterFlow(NSXCore.getHotwaterFlow() - 1.0));
+document.getElementById('btn-hotwater-vol-up')?.addEventListener('click', () =>
+  NSXCore.setHotwaterVolume(NSXCore.getHotwaterVolume() + 10));
+document.getElementById('btn-hotwater-vol-down')?.addEventListener('click', () =>
+  NSXCore.setHotwaterVolume(NSXCore.getHotwaterVolume() - 10));
 
 /* ── Hotwater Settings Modal ─────────────────────────── */
 
@@ -3814,7 +3765,7 @@ const hotwaterSettingsModalEl = document.getElementById('hotwater-settings-modal
 let _hotwaterSettingsDraft = null;
 
 function _openHotwaterSettingsModal() {
-  _hotwaterSettingsDraft = JSON.parse(JSON.stringify(hotwaterPresets));
+  _hotwaterSettingsDraft = JSON.parse(JSON.stringify(NSXCore.getHotwaterPresets()));
   const presetEls = hotwaterSettingsModalEl?.querySelectorAll('.hotwater-settings-preset') ?? [];
   presetEls.forEach(el => {
     const key = el.dataset.preset;
@@ -3886,15 +3837,7 @@ document.getElementById('btn-hotwater-settings-save')?.addEventListener('click',
     const nameVal = el.querySelector('.steam-settings-name-input')?.value.trim();
     _hotwaterSettingsDraft[key].name = nameVal || key;
   });
-  hotwaterPresets = _hotwaterSettingsDraft;
-  saveHotwaterPresets(hotwaterPresets);
-  _updateHotwaterPresetButtons();
-  if (activeHotwaterPreset && hotwaterPresets[activeHotwaterPreset]) {
-    hotwaterTemp   = hotwaterPresets[activeHotwaterPreset].temp;
-    hotwaterFlow   = hotwaterPresets[activeHotwaterPreset].flow ?? 1.5;
-    hotwaterVolume = hotwaterPresets[activeHotwaterPreset].volume;
-    applyHotwaterState();
-  }
+  NSXCore.setHotwaterPresets(_hotwaterSettingsDraft);
   if (hotwaterSettingsModalEl) hotwaterSettingsModalEl.hidden = true;
 });
 
@@ -4058,11 +4001,11 @@ document.getElementById('btn-flush-settings-save')?.addEventListener('click', ()
     openNumberPicker(_npMakeRange(1, 180, 1), steamDuration, v => { steamDuration = v; saveSteamState(); pushSteamDuration(); }));
 
   document.getElementById('hotwater-temp')?.addEventListener('click', () =>
-    openNumberPicker(_npMakeRange(50, 100, 5), hotwaterTemp, v => { hotwaterTemp = v; _deactivateHotwaterPreset(); saveHotwaterState(); pushHotwaterTemp(); }));
+    openNumberPicker(_npMakeRange(50, 100, 5), NSXCore.getHotwaterTemp(), v => NSXCore.setHotwaterTemp(v)));
   document.getElementById('hotwater-flow')?.addEventListener('click', () =>
-    openNumberPicker(_npMakeRange(0.5, 10.0, 0.1), hotwaterFlow, v => { hotwaterFlow = v; _deactivateHotwaterPreset(); saveHotwaterState(); pushHotwaterFlow(); }, 1));
+    openNumberPicker(_npMakeRange(0.5, 10.0, 0.1), NSXCore.getHotwaterFlow(), v => NSXCore.setHotwaterFlow(v), 1));
   document.getElementById('hotwater-volume')?.addEventListener('click', () =>
-    openNumberPicker(_npMakeRange(10, 500, 10), hotwaterVolume, v => { hotwaterVolume = v; _deactivateHotwaterPreset(); saveHotwaterState(); pushHotwaterVolume(); }));
+    openNumberPicker(_npMakeRange(10, 500, 10), NSXCore.getHotwaterVolume(), v => NSXCore.setHotwaterVolume(v)));
 
   document.getElementById('flush-flow')?.addEventListener('click', () =>
     openNumberPicker(_npMakeRange(1, 10, 1), NSXCore.getFlushFlow(), v => NSXCore.setFlushFlow(v)));
@@ -4083,10 +4026,6 @@ function pushSteamFlow()     { debounced('steamFlow',     () => push({ steamSett
 function pushSteamDuration() { debounced('steamDuration', () => push({ steamSettings: { duration: parseFloat(steamDuration) } })); }
 function pushSteam()         { debounced('steam',         () => push({ steamSettings: { targetTemperature: parseFloat(steamTemp), flow: parseFloat(steamFlow), duration: parseFloat(steamDuration) } })); }
 
-function pushHotwaterTemp()   { debounced('hwTemp',   () => push({ hotWaterData: { targetTemperature: parseFloat(hotwaterTemp) } })); }
-function pushHotwaterFlow()   { debounced('hwFlow',   () => push({ hotWaterData: { flow: parseFloat(hotwaterFlow) } })); }
-function pushHotwaterVolume() { debounced('hwVolume', () => push({ hotWaterData: { volume: parseFloat(hotwaterVolume) } })); }
-function pushHotwater()       { debounced('hotwater', () => push({ hotWaterData: { targetTemperature: parseFloat(hotwaterTemp), flow: parseFloat(hotwaterFlow), volume: parseFloat(hotwaterVolume) } })); }
 
 
 /* ── Schedule State ───────────────────────────────────── */
@@ -4166,22 +4105,7 @@ async function hydrateUiSettingsFromStore() {
       _batchFreezeEnabled = true;
     }
 
-    if (storeSettings.nsx_hotwater_presets && typeof storeSettings.nsx_hotwater_presets === 'object') {
-      const stored = storeSettings.nsx_hotwater_presets;
-      hotwaterPresets = {
-        klein:  { ...HOTWATER_PRESET_DEFAULTS.klein,  ...stored.klein  },
-        mittel: { ...HOTWATER_PRESET_DEFAULTS.mittel, ...stored.mittel },
-        gross:  { ...HOTWATER_PRESET_DEFAULTS.gross,  ...stored.gross  },
-      };
-    }
-    if (typeof storeSettings.nsx_hotwater_active_preset === 'string') {
-      if (hotwaterPresets[storeSettings.nsx_hotwater_active_preset]) {
-        activeHotwaterPreset = storeSettings.nsx_hotwater_active_preset;
-      } else if (storeSettings.nsx_hotwater_active_preset === '') {
-        activeHotwaterPreset = null;
-      }
-    }
-
+    NSXCore.hydrateHotwater();
     NSXCore.hydrateFlush();
 
     if (storeSettings.nsx_schedule && typeof storeSettings.nsx_schedule === 'object') {
@@ -4248,18 +4172,13 @@ async function hydrateUiSettingsFromStore() {
     steamFlow = steamState.flow;
     steamDuration = steamState.duration ?? 60;
 
-    const hotwaterState = hotwaterPresets[activeHotwaterPreset] ?? hotwaterPresets.mittel;
-    hotwaterTemp = hotwaterState.temp;
-    hotwaterFlow = hotwaterState.flow ?? 1.5;
-    hotwaterVolume = hotwaterState.volume;
-
     setSteamWidget(steamTemp, steamFlow, steamDuration);
     _updateSteamPresetButtons();
     _updateSbwWidget();
     _applySbwEnabled();
     _applyRatioDoseVisible();
     _applyShowRecipeCardRating();
-    setHotwaterWidget(hotwaterTemp, hotwaterFlow, hotwaterVolume);
+    setHotwaterWidget(NSXCore.getHotwaterTemp(), NSXCore.getHotwaterFlow(), NSXCore.getHotwaterVolume());
     updateFlushDisplay();
     renderScheduleUI();
     applyPresetButtonStates();
@@ -8593,8 +8512,8 @@ function openWorkflowEditModal(index) {
 
   _setEditSteamTemp(steamTemp);
   _setEditSteamDur(steamDuration);
-  _setEditHwTemp(hotwaterTemp);
-  _setEditHwVol(hotwaterVolume);
+  _setEditHwTemp(NSXCore.getHotwaterTemp());
+  _setEditHwVol(NSXCore.getHotwaterVolume());
   _setEditGroupTemp(Number(workflow.groupTemp || gwf?.profile?.groupTemp) || 93);
 
   _originalIdentity = {
@@ -8665,8 +8584,8 @@ function openWorkflowCreateModal() {
   _setEditGroupTemp(93);
   _setEditSteamTemp(steamTemp);
   _setEditSteamDur(steamDuration);
-  _setEditHwTemp(hotwaterTemp);
-  _setEditHwVol(hotwaterVolume);
+  _setEditHwTemp(NSXCore.getHotwaterTemp());
+  _setEditHwVol(NSXCore.getHotwaterVolume());
 
   document.getElementById('edit-card-bean')?.classList.remove('recipe-edit-card--identity-changed');
   document.getElementById('edit-card-grinder')?.classList.remove('recipe-edit-card--identity-changed');
@@ -11361,7 +11280,7 @@ setScaleConnected(false);
 setBrewGroupTemperature(91.5);
 setWaterLevel(0);
 setSteamWidget(steamTemp, steamFlow, steamDuration);
-setHotwaterWidget(hotwaterTemp, hotwaterFlow, hotwaterVolume);
+setHotwaterWidget(NSXCore.getHotwaterTemp(), NSXCore.getHotwaterFlow(), NSXCore.getHotwaterVolume());
 updateFlushDisplay();
 renderScheduleUI();
 applyPresetButtonStates();
