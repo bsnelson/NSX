@@ -1926,9 +1926,8 @@ async function loadApiData() {
   try {
     const schedules = await fetchSchedules();
     const existing = Array.isArray(schedules) ? schedules[0] : schedules?.items?.[0];
-    if (existing?.id && !scheduleState.scheduleId) {
-      scheduleState.scheduleId = existing.id;
-      saveScheduleState();
+    if (existing?.id && !NSXCore.getScheduleState().scheduleId) {
+      NSXCore.setScheduleId(existing.id);
       console.log('[Schedule] Loaded existing schedule id from API:', existing.id);
     }
   } catch (e) {
@@ -3934,23 +3933,9 @@ NSXCore.on('toast', (msg) => showToast(msg));
 
 /* ── Schedule State ───────────────────────────────────── */
 
-const SCHEDULE_DEFAULTS = {
-  enabled: false,
-  days: [1, 2, 3, 4, 5],
-  onHour: 6, onMinute: 0,
-  offHour: 22, offMinute: 0,
-  scheduleId: null,
-};
+/* ── Schedule State (domain in core/domains/schedule.js) ── */
 
-function loadScheduleState() {
-  return Object.assign({}, SCHEDULE_DEFAULTS);
-}
-
-function saveScheduleState() {
-  patchStoreSettings({ nsx_schedule: scheduleState });
-}
-
-let scheduleState = loadScheduleState();
+NSXCore.on('scheduleChanged', () => renderScheduleUI());
 
 function applyPresetButtonStates() {
   _updateSteamPresetButtons();
@@ -3978,9 +3963,7 @@ async function hydrateUiSettingsFromStore() {
     NSXCore.hydrateHotwater();
     NSXCore.hydrateFlush();
 
-    if (storeSettings.nsx_schedule && typeof storeSettings.nsx_schedule === 'object') {
-      scheduleState = Object.assign({}, SCHEDULE_DEFAULTS, storeSettings.nsx_schedule);
-    }
+    NSXCore.hydrateSchedule();
 
     if (typeof storeSettings.nsx_presence_enabled === 'boolean') {
       _presenceEnabled = storeSettings.nsx_presence_enabled;
@@ -4062,121 +4045,61 @@ async function hydrateUiSettingsFromStore() {
 function pad2(n) { return String(n).padStart(2, '0'); }
 
 function renderScheduleUI() {
+  const s = NSXCore.getScheduleState();
   const toggleEl = document.getElementById('schedule-enabled');
-  if (toggleEl) toggleEl.checked = scheduleState.enabled;
+  if (toggleEl) toggleEl.checked = s.enabled;
 
   document.querySelectorAll('.schedule-day-btn').forEach(btn => {
-    btn.classList.toggle('is-active', scheduleState.days.includes(Number(btn.dataset.day)));
+    btn.classList.toggle('is-active', s.days.includes(Number(btn.dataset.day)));
   });
 
   const onH  = document.getElementById('schedule-on-hour');
   const onM  = document.getElementById('schedule-on-minute');
   const offH = document.getElementById('schedule-off-hour');
   const offM = document.getElementById('schedule-off-minute');
-  if (onH)  onH.textContent  = pad2(scheduleState.onHour);
-  if (onM)  onM.textContent  = pad2(scheduleState.onMinute);
-  if (offH) offH.textContent = pad2(scheduleState.offHour);
-  if (offM) offM.textContent = pad2(scheduleState.offMinute);
-}
-
-async function syncScheduleToApi() {
-  if (!scheduleState.enabled) {
-    if (scheduleState.scheduleId) {
-      try {
-        await updateSchedule(scheduleState.scheduleId, { id: scheduleState.scheduleId, enabled: false });
-      } catch {}
-    }
-    return;
-  }
-  const days = scheduleState.days.length > 0 ? scheduleState.days : [1, 2, 3, 4, 5, 6, 7];
-  const time = `${pad2(scheduleState.onHour)}:${pad2(scheduleState.onMinute)}`;
-  if (scheduleState.scheduleId) {
-    try {
-      await updateSchedule(scheduleState.scheduleId, {
-        id: scheduleState.scheduleId,
-        time,
-        daysOfWeek: days,
-        enabled: true,
-        keepAwakeFor: 0,
-      });
-      return;
-    } catch {
-      scheduleState.scheduleId = null;
-      saveScheduleState();
-    }
-  }
-  try {
-    const created = await createSchedule({
-      time,
-      daysOfWeek: days,
-      enabled: true,
-      keepAwakeFor: 0,
-    });
-    scheduleState.scheduleId = created?.id || null;
-    saveScheduleState();
-  } catch (err) {
-    showToast(t('toast.scheduleFailed') + ': ' + err.message);
-  }
-}
-
-function applyScheduleState() {
-  saveScheduleState();
-  renderScheduleUI();
-  syncScheduleToApi();
+  if (onH)  onH.textContent  = pad2(s.onHour);
+  if (onM)  onM.textContent  = pad2(s.onMinute);
+  if (offH) offH.textContent = pad2(s.offHour);
+  if (offM) offM.textContent = pad2(s.offMinute);
 }
 
 // Toggle schedule enabled
 document.getElementById('schedule-enabled')?.addEventListener('change', (e) => {
-  scheduleState.enabled = e.target.checked;
-  applyScheduleState();
+  NSXCore.applySchedule({ enabled: e.target.checked });
 });
 
 // Day buttons
 document.querySelectorAll('.schedule-day-btn').forEach(btn => {
   btn.addEventListener('click', () => {
+    const s = NSXCore.getScheduleState();
     const day = Number(btn.dataset.day);
-    const idx = scheduleState.days.indexOf(day);
-    if (idx >= 0) scheduleState.days.splice(idx, 1);
-    else scheduleState.days.push(day);
-    applyScheduleState();
+    const days = s.days.slice();
+    const idx = days.indexOf(day);
+    if (idx >= 0) days.splice(idx, 1);
+    else days.push(day);
+    NSXCore.applySchedule({ days });
   });
 });
 
 // On-time buttons
-document.getElementById('btn-sch-on-h-up')?.addEventListener('click', () => {
-  scheduleState.onHour = (scheduleState.onHour + 1) % 24;
-  applyScheduleState();
-});
-document.getElementById('btn-sch-on-h-down')?.addEventListener('click', () => {
-  scheduleState.onHour = (scheduleState.onHour + 23) % 24;
-  applyScheduleState();
-});
-document.getElementById('btn-sch-on-m-up')?.addEventListener('click', () => {
-  scheduleState.onMinute = (scheduleState.onMinute + 15) % 60;
-  applyScheduleState();
-});
-document.getElementById('btn-sch-on-m-down')?.addEventListener('click', () => {
-  scheduleState.onMinute = (scheduleState.onMinute + 45) % 60;
-  applyScheduleState();
-});
+document.getElementById('btn-sch-on-h-up')?.addEventListener('click', () =>
+  NSXCore.applySchedule({ onHour: (NSXCore.getScheduleState().onHour + 1) % 24 }));
+document.getElementById('btn-sch-on-h-down')?.addEventListener('click', () =>
+  NSXCore.applySchedule({ onHour: (NSXCore.getScheduleState().onHour + 23) % 24 }));
+document.getElementById('btn-sch-on-m-up')?.addEventListener('click', () =>
+  NSXCore.applySchedule({ onMinute: (NSXCore.getScheduleState().onMinute + 15) % 60 }));
+document.getElementById('btn-sch-on-m-down')?.addEventListener('click', () =>
+  NSXCore.applySchedule({ onMinute: (NSXCore.getScheduleState().onMinute + 45) % 60 }));
 
 // Off-time buttons (client-side sleep, no API endpoint for sleep schedules)
-document.getElementById('btn-sch-off-h-up')?.addEventListener('click', () => {
-  scheduleState.offHour = (scheduleState.offHour + 1) % 24;
-  applyScheduleState();
-});
-document.getElementById('btn-sch-off-h-down')?.addEventListener('click', () => {
-  scheduleState.offHour = (scheduleState.offHour + 23) % 24;
-  applyScheduleState();
-});
-document.getElementById('btn-sch-off-m-up')?.addEventListener('click', () => {
-  scheduleState.offMinute = (scheduleState.offMinute + 15) % 60;
-  applyScheduleState();
-});
-document.getElementById('btn-sch-off-m-down')?.addEventListener('click', () => {
-  scheduleState.offMinute = (scheduleState.offMinute + 45) % 60;
-  applyScheduleState();
-});
+document.getElementById('btn-sch-off-h-up')?.addEventListener('click', () =>
+  NSXCore.applySchedule({ offHour: (NSXCore.getScheduleState().offHour + 1) % 24 }));
+document.getElementById('btn-sch-off-h-down')?.addEventListener('click', () =>
+  NSXCore.applySchedule({ offHour: (NSXCore.getScheduleState().offHour + 23) % 24 }));
+document.getElementById('btn-sch-off-m-up')?.addEventListener('click', () =>
+  NSXCore.applySchedule({ offMinute: (NSXCore.getScheduleState().offMinute + 15) % 60 }));
+document.getElementById('btn-sch-off-m-down')?.addEventListener('click', () =>
+  NSXCore.applySchedule({ offMinute: (NSXCore.getScheduleState().offMinute + 45) % 60 }));
 
 // Client-side sleep timer (checks every minute)
 
