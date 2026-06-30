@@ -10,7 +10,7 @@
   } = window.NSXApi || {};
 
   const SS_IMAGES = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15]
-    .map(n => `src/ui/screensaver/Screen_saver_Decent_${n}.jpg`);
+    .map(n => `ui/screensaver/Screen_saver_Decent_${n}.jpg`);
 
   let ssActive = false;
   let ssImgIndex = 0;

@@ -10382,7 +10382,7 @@ function renderBatchList(batches) {
     const badge = formatBatchDateBadge(b.roastDate);
     return `
     <div class="batch-item" data-batch-index="${i}">
-      <img src="src/ui/graphics/Packung.png" class="batch-item-img" alt="${t('batchEditor.title')}" draggable="false" />
+      <img src="ui/graphics/Packung.png" class="batch-item-img" alt="${t('batchEditor.title')}" draggable="false" />
       <div class="batch-roast-badge">
         <span class="batch-roast-badge-day">${badge.day}</span>
         <span class="batch-roast-badge-month">${badge.month}</span>

@@ -1,0 +1,6 @@
+{
+  "name": "@espresso-skins/nsx",
+  "version": "0.0.0",
+  "private": true,
+  "description": "NSX skin for the Decent DE1 (vanilla JS, no build step)"
+}

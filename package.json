@@ -1,0 +1,9 @@
+{
+  "name": "espresso-skins",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monorepo for Decent DE1 skins sharing a headless core",
+  "workspaces": [
+    "packages/*"
+  ]
+}

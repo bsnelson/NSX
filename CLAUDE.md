@@ -2,41 +2,54 @@
 
 ## What This Project Is
 
-NSX is a UI skin for the [Decent DE1](https://decentespresso.com/) espresso machine, built on top of the **Decent.app** gateway. It runs as a single-page web app (vanilla JS, no build step, no npm) served locally to the machine's web interface.
+NSX is a UI skin for the [Decent DE1](https://decentespresso.com/) espresso machine, built on top of the **Decent.app** gateway. It runs as a single-page web app (vanilla JS, no build step at runtime) served locally to the machine's web interface. The repo is an npm-workspaces monorepo (`packages/*`), but npm is only used for monorepo management — the NSX skin itself has no build step.
 
 ## Tech Stack
 
 - **Vanilla JS (ES6+)** — no frameworks, no bundler
 - **HTML5 + CSS3** — single entry point: `index.html`
-- **WebSocket** — real-time updates from the Decent gateway (`src/modules/api.js`)
+- **WebSocket** — real-time updates from the Decent gateway (`packages/core/src/api.js`)
 - **uPlot** — charting library for shot graphs (bundled)
 - **PWA** — manifest.json enables mobile web app install
 
 ## Project Structure
 
+This repo is an **npm-workspaces monorepo** (`packages/*`). The shared, DOM-free
+core lives in `packages/core`; each skin is its own package. NSX stays vanilla JS
+with no build step — `index.html` loads the core via relative `../../core/src/`
+paths in dev, and the release workflow flattens core into the ZIP at `core/`.
+
 ```
-NSX/
-├── index.html              # SPA shell — loads all modules
-├── manifest.json           # PWA manifest
-├── src/
-│   ├── css/
-│   │   ├── app.css         # Main stylesheet
-│   │   └── phone.css       # Mobile overrides
-│   └── modules/
-│       ├── app.js          # Orchestrator — global state, event wiring, post-shot actions
-│       ├── api.js          # REST + WebSocket gateway communication
-│       ├── ui.js           # DOM rendering
-│       ├── settings.js     # Settings panel logic
-│       ├── translations.js # i18n strings (DE + others)
-│       ├── router.js       # Client-side panel navigation
-│       ├── config.js       # Constants
-│       ├── screensaver.js  # Screensaver
-│       ├── workflow.js     # Workflow stub
-│       ├── history.js      # Shot history stub
-│       └── liveshot.js     # Live shot data stub
+espresso-skins/                     # repo root (npm workspaces)
+├── package.json                    # workspaces: ["packages/*"]
+├── packages/
+│   ├── core/                       # shared, DOM-FREE package
+│   │   ├── package.json
+│   │   └── src/
+│   │       ├── config.js           # Constants
+│   │       ├── api.js              # REST + WebSocket gateway communication
+│   │       └── translations.js     # i18n strings (DE + others)
+│   └── nsx/                         # NSX skin (vanilla JS, no build)
+│       ├── package.json
+│       ├── manifest.json           # PWA manifest (id: "NSX-skin")
+│       └── src/
+│           ├── index.html          # SPA shell — loads core (../../core/src) + nsx modules
+│           ├── css/                # app.css, phone.css
+│           ├── ui/                 # graphics/, screensaver/ images
+│           └── modules/
+│               ├── app.js          # Orchestrator — global state, event wiring, post-shot actions
+│               ├── ui.js           # DOM rendering
+│               ├── settings.js     # Settings panel logic
+│               ├── router.js       # Client-side panel navigation
+│               ├── screensaver.js  # Screensaver
+│               ├── workflow.js     # Workflow stub (not loaded)
+│               ├── history.js      # Shot history stub (not loaded)
+│               └── liveshot.js     # Live shot data stub (not loaded)
 └── .github/workflows/
-    └── release.yml         # GitHub Actions release pipeline
+    └── release-nsx.yml             # Per-skin release (tag: nsx-v*) — assembles a self-contained ZIP
 ```
+
+> Function-index line numbers below refer to `packages/nsx/src/modules/app.js`.
 
 ## app.js Function Index
 

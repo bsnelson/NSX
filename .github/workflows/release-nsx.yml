@@ -1,0 +1,48 @@
+name: Build and Release NSX Skin
+
+on:
+  push:
+    tags:
+      - 'nsx-v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set version from tag
+        id: version
+        # nsx-v0.2.9 -> v0.2.9
+        run: echo "VERSION=${GITHUB_REF_NAME#nsx-}" >> $GITHUB_OUTPUT
+
+      - name: Assemble self-contained skin
+        # Flatten core + nsx into one staging dir so index.html + manifest.json sit
+        # at the ZIP root and the shared core is reachable at core/. Dev loads core
+        # via ../../core/src/; the ZIP serves it from core/, so rewrite those paths.
+        run: |
+          mkdir -p staging/core
+          cp -r packages/nsx/src/. staging/
+          cp packages/nsx/manifest.json staging/manifest.json
+          cp -r packages/core/src/. staging/core/
+          sed -i 's#\.\./\.\./core/src/#core/#g' staging/index.html
+          jq '.version = "${{ steps.version.outputs.VERSION }}" | .repository = "${{ github.repository }}"' staging/manifest.json > staging/manifest.tmp.json
+          mv staging/manifest.tmp.json staging/manifest.json
+
+      - name: Create release archive
+        run: |
+          cd staging
+          zip -r ../NSX-${{ steps.version.outputs.VERSION }}.zip .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: NSX-${{ steps.version.outputs.VERSION }}.zip
+          name: NSX ${{ steps.version.outputs.VERSION }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
