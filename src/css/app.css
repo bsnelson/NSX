@@ -10179,8 +10179,14 @@ html, body {
   display: none;
 }
 
+/* Anchor the search bar near the top so it stays fully visible when the on-screen
+   keyboard opens (bottom-anchored, it gets pushed up through the top of the screen). */
+#search-input-modal {
+  align-items: flex-start;
+}
 #search-input-modal .field-picker-sheet {
   max-height: none;
+  margin-bottom: 0;
 }
 
 .field-picker-sheet {

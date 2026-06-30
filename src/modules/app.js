@@ -5637,8 +5637,13 @@ document.getElementById('btn-workflow-history-shortcut')?.addEventListener('clic
   const currentWorkflow = workflowItems[selectedWorkflowIndex];
   if (!currentWorkflow) return;
   const matching = findShotsForWorkflow(currentWorkflow);
-  const latest = matching?.[0];
-  if (latest?.id) openShotReview(latest.id);
+  if (!matching?.length) return;
+  // Open the shot currently shown by the date picker (shot-nav index), not the latest.
+  const graphEl = document.getElementById('workflow-shot-graph');
+  const navIdx = Number(graphEl?._shotNav?.index);
+  const idx = Number.isInteger(navIdx) ? Math.max(0, Math.min(navIdx, matching.length - 1)) : 0;
+  const shot = matching[idx] || matching[0];
+  if (shot?.id) openShotReview(shot.id);
 });
 
 /* ── Workflow Edit Modal ──────────────────────────────── */
