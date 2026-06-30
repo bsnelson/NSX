@@ -1054,7 +1054,7 @@ async function _buildRecipeGatewayPayload(workflow) {
     // gateway applies them in ONE PUT (instead of 4 racing PUTs that get "Queue Cancelled").
     steamSettings: { targetTemperature: _steamEnabled ? steamTemp : 0, flow: _steamEnabled ? steamFlow : 0, duration: steamDuration },
     hotWaterData:  { targetTemperature: hotwaterTemp, volume: hotwaterVolume },
-    rinseData:     { flow: flushFlow, duration: flushDuration },
+    rinseData:     { flow: NSXCore.getFlushFlow(), duration: NSXCore.getFlushDuration() },
   };
 
   workflow._resolvedPayload = payload;
@@ -1128,7 +1128,7 @@ async function _pushCurrentSkinStateToMachine(bypassStateCheck = false) {
     console.warn('Hotwater-Sync fehlgeschlagen:', err?.message);
   }
   try {
-    await pushFlushSettings(flushFlow, flushDuration);
+    await pushFlushSettings(NSXCore.getFlushFlow(), NSXCore.getFlushDuration());
   } catch (err) {
     console.warn('Flush-Sync fehlgeschlagen:', err?.message);
   }
@@ -1863,6 +1863,7 @@ function startFlushSession() {
 
   _flushTimerInterval = setInterval(() => {
     const elapsed = (Date.now() - _flushStartTime) / 1000;
+    const flushDuration = NSXCore.getFlushDuration();
     if (elapsedEl) elapsedEl.textContent = String(Math.max(0, flushDuration - Math.floor(elapsed)));
     if (progressEl && flushDuration > 0) {
       const pct = Math.min(elapsed / flushDuration, 1);
@@ -3897,87 +3898,44 @@ document.getElementById('btn-hotwater-settings-save')?.addEventListener('click',
   if (hotwaterSettingsModalEl) hotwaterSettingsModalEl.hidden = true;
 });
 
-/* ── Flush State ──────────────────────────────────────── */
+/* ── Flush State (domain in core/domains/flush.js) ────── */
 
-const FLUSH_PRESET_DEFAULTS = {
-  kurz:   { name: 'Short',  flow: 10, duration: 3  },
-  normal: { name: 'Normal', flow: 10, duration: 5  },
-  lang:   { name: 'Long',   flow: 10, duration: 10 },
-};
-
-function loadFlushPresets() {
-  return Object.assign({}, FLUSH_PRESET_DEFAULTS);
-}
-
-function saveFlushPresets(presets) {
-  patchStoreSettings({ nsx_flush_presets: presets });
-}
-
-let flushPresets = loadFlushPresets();
-let activeFlushPreset = 'normal';
-const _fp = flushPresets[activeFlushPreset] ?? flushPresets.normal;
-let flushFlow     = _fp.flow;
-let flushDuration = _fp.duration;
+// Flush state + machine push live in core. This skin renders on 'flushChanged'
+// and drives the domain via NSXCore commands; all DOM stays here.
+NSXCore.on('flushChanged', () => {
+  updateFlushDisplay();
+  _updateFlushPresetButtons();
+});
 
 function updateFlushDisplay() {
   const flowEl = document.getElementById('flush-flow');
   const durEl  = document.getElementById('flush-duration');
-  if (flowEl) flowEl.textContent = `${flushFlow} ml/s`;
-  if (durEl)  durEl.textContent  = `${flushDuration} s`;
+  if (flowEl) flowEl.textContent = `${NSXCore.getFlushFlow()} ml/s`;
+  if (durEl)  durEl.textContent  = `${NSXCore.getFlushDuration()} s`;
 }
 
 function _updateFlushPresetButtons() {
+  const presets = NSXCore.getFlushPresets();
+  const active  = NSXCore.getActiveFlushPreset();
   document.querySelectorAll('.cleaning-card .steam-preset-btn').forEach(btn => {
     const key = btn.dataset.preset;
-    btn.textContent = flushPresets[key]?.name ?? key;
-    btn.classList.toggle('is-active', key === activeFlushPreset);
+    btn.textContent = presets[key]?.name ?? key;
+    btn.classList.toggle('is-active', key === active);
   });
 }
 
-function _deactivateFlushPreset() {
-  activeFlushPreset = null;
-  saveActivePresetName('nsx_flush_active_preset', '');
-  _updateFlushPresetButtons();
-}
-
-function saveFlushState() {
-  updateFlushDisplay();
-}
-
-function applyFlushState() {
-  saveFlushState();
-  pushFlush();
-}
-
-function selectFlushPreset(presetName) {
-  activeFlushPreset = presetName;
-  saveActivePresetName('nsx_flush_active_preset', presetName);
-  flushFlow     = flushPresets[presetName].flow;
-  flushDuration = flushPresets[presetName].duration;
-  _updateFlushPresetButtons();
-  applyFlushState();
-}
-
 document.querySelectorAll('.cleaning-card .steam-preset-btn').forEach(btn => {
-  btn.addEventListener('click', () => selectFlushPreset(btn.dataset.preset));
+  btn.addEventListener('click', () => NSXCore.selectFlushPreset(btn.dataset.preset));
 });
 
-document.getElementById('btn-flush-flow-up')?.addEventListener('click', () => {
-  flushFlow = Math.min(flushFlow + 1, 10);
-  _deactivateFlushPreset(); saveFlushState(); pushFlushFlow();
-});
-document.getElementById('btn-flush-flow-down')?.addEventListener('click', () => {
-  flushFlow = Math.max(flushFlow - 1, 1);
-  _deactivateFlushPreset(); saveFlushState(); pushFlushFlow();
-});
-document.getElementById('btn-flush-duration-up')?.addEventListener('click', () => {
-  flushDuration = Math.min(flushDuration + 1, 60);
-  _deactivateFlushPreset(); saveFlushState(); pushFlushDuration();
-});
-document.getElementById('btn-flush-duration-down')?.addEventListener('click', () => {
-  flushDuration = Math.max(flushDuration - 1, 1);
-  _deactivateFlushPreset(); saveFlushState(); pushFlushDuration();
-});
+document.getElementById('btn-flush-flow-up')?.addEventListener('click', () =>
+  NSXCore.setFlushFlow(NSXCore.getFlushFlow() + 1));
+document.getElementById('btn-flush-flow-down')?.addEventListener('click', () =>
+  NSXCore.setFlushFlow(NSXCore.getFlushFlow() - 1));
+document.getElementById('btn-flush-duration-up')?.addEventListener('click', () =>
+  NSXCore.setFlushDuration(NSXCore.getFlushDuration() + 1));
+document.getElementById('btn-flush-duration-down')?.addEventListener('click', () =>
+  NSXCore.setFlushDuration(NSXCore.getFlushDuration() - 1));
 
 /* ── Flush Settings Modal ────────────────────────────── */
 
@@ -3994,7 +3952,7 @@ function _renderFlushMachineSettings() {
 }
 
 function _openFlushSettingsModal() {
-  _flushSettingsDraft = JSON.parse(JSON.stringify(flushPresets));
+  _flushSettingsDraft = JSON.parse(JSON.stringify(NSXCore.getFlushPresets()));
   flushSettingsModalEl?.querySelectorAll('.flush-settings-preset').forEach(el => {
     const key = el.dataset.preset;
     const p = _flushSettingsDraft[key];
@@ -4085,14 +4043,7 @@ document.getElementById('btn-flush-settings-save')?.addEventListener('click', ()
     const nameVal = el.querySelector('.steam-settings-name-input')?.value.trim();
     _flushSettingsDraft[key].name = nameVal || key;
   });
-  flushPresets = _flushSettingsDraft;
-  saveFlushPresets(flushPresets);
-  _updateFlushPresetButtons();
-  if (activeFlushPreset && flushPresets[activeFlushPreset]) {
-    flushFlow     = flushPresets[activeFlushPreset].flow;
-    flushDuration = flushPresets[activeFlushPreset].duration;
-    applyFlushState();
-  }
+  NSXCore.setFlushPresets(_flushSettingsDraft);
   updateMachineSettings?.({ flushTemp: _flushMachineTemp, flushTimeout: _flushMachineTimeout }).catch(() => {});
   if (flushSettingsModalEl) flushSettingsModalEl.hidden = true;
 });
@@ -4114,9 +4065,9 @@ document.getElementById('btn-flush-settings-save')?.addEventListener('click', ()
     openNumberPicker(_npMakeRange(10, 500, 10), hotwaterVolume, v => { hotwaterVolume = v; _deactivateHotwaterPreset(); saveHotwaterState(); pushHotwaterVolume(); }));
 
   document.getElementById('flush-flow')?.addEventListener('click', () =>
-    openNumberPicker(_npMakeRange(1, 10, 1), flushFlow, v => { flushFlow = v; _deactivateFlushPreset(); saveFlushState(); pushFlushFlow(); }));
+    openNumberPicker(_npMakeRange(1, 10, 1), NSXCore.getFlushFlow(), v => NSXCore.setFlushFlow(v)));
   document.getElementById('flush-duration')?.addEventListener('click', () =>
-    openNumberPicker(_npMakeRange(1, 60, 1), flushDuration, v => { flushDuration = v; _deactivateFlushPreset(); saveFlushState(); pushFlushDuration(); }));
+    openNumberPicker(_npMakeRange(1, 60, 1), NSXCore.getFlushDuration(), v => NSXCore.setFlushDuration(v)));
 }
 
 /* ── Machine Settings Push ────────────────────────────── */
@@ -4137,9 +4088,6 @@ function pushHotwaterFlow()   { debounced('hwFlow',   () => push({ hotWaterData:
 function pushHotwaterVolume() { debounced('hwVolume', () => push({ hotWaterData: { volume: parseFloat(hotwaterVolume) } })); }
 function pushHotwater()       { debounced('hotwater', () => push({ hotWaterData: { targetTemperature: parseFloat(hotwaterTemp), flow: parseFloat(hotwaterFlow), volume: parseFloat(hotwaterVolume) } })); }
 
-function pushFlushFlow()     { debounced('flushFlow', () => push({ rinseData: { flow: parseFloat(flushFlow) } })); }
-function pushFlushDuration() { debounced('flushDur',  () => push({ rinseData: { duration: parseFloat(flushDuration) } })); }
-function pushFlush()         { debounced('flush',     () => push({ rinseData: { flow: parseFloat(flushFlow), duration: parseFloat(flushDuration) } })); }
 
 /* ── Schedule State ───────────────────────────────────── */
 
@@ -4234,21 +4182,7 @@ async function hydrateUiSettingsFromStore() {
       }
     }
 
-    if (storeSettings.nsx_flush_presets && typeof storeSettings.nsx_flush_presets === 'object') {
-      const stored = storeSettings.nsx_flush_presets;
-      flushPresets = {
-        kurz:   { ...FLUSH_PRESET_DEFAULTS.kurz,   ...stored.kurz   },
-        normal: { ...FLUSH_PRESET_DEFAULTS.normal, ...stored.normal },
-        lang:   { ...FLUSH_PRESET_DEFAULTS.lang,   ...stored.lang   },
-      };
-    }
-    if (typeof storeSettings.nsx_flush_active_preset === 'string') {
-      if (flushPresets[storeSettings.nsx_flush_active_preset]) {
-        activeFlushPreset = storeSettings.nsx_flush_active_preset;
-      } else if (storeSettings.nsx_flush_active_preset === '') {
-        activeFlushPreset = null;
-      }
-    }
+    NSXCore.hydrateFlush();
 
     if (storeSettings.nsx_schedule && typeof storeSettings.nsx_schedule === 'object') {
       scheduleState = Object.assign({}, SCHEDULE_DEFAULTS, storeSettings.nsx_schedule);
@@ -4318,10 +4252,6 @@ async function hydrateUiSettingsFromStore() {
     hotwaterTemp = hotwaterState.temp;
     hotwaterFlow = hotwaterState.flow ?? 1.5;
     hotwaterVolume = hotwaterState.volume;
-
-    const flushState = flushPresets[activeFlushPreset] ?? flushPresets.normal;
-    flushFlow = flushState.flow;
-    flushDuration = flushState.duration;
 
     setSteamWidget(steamTemp, steamFlow, steamDuration);
     _updateSteamPresetButtons();
