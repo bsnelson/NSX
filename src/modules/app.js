@@ -162,6 +162,12 @@ function showAlert(message) {
   });
 }
 
+/* Close every open modal overlay (shot review, pickers, dialogs, …) — used when
+   a shot starts so the live shot isn't hidden behind a modal. */
+function _closeOpenModals() {
+  document.querySelectorAll('.modal-overlay:not([hidden])').forEach(el => { el.hidden = true; });
+}
+
 /* ── Global State ─────────────────────────────────────── */
 let selectedWorkflowIndex = 0;
 let _lastRecipeId = null;
@@ -2224,6 +2230,9 @@ window.addEventListener("gateway:machineState", (event) => {
   if (historyTabEl) historyTabEl.hidden = state === 'espresso';
 
   if (state === 'espresso' && !wasEspressoLike) {
+    // A shot just started — close any open modal (as if the user pressed Close)
+    // so the live shot on the Rezepte tab isn't hidden behind it.
+    _closeOpenModals();
     window.NSXRouter?.setTab(1);
     tareScale?.().catch(() => {});
     startLiveShotSession();
