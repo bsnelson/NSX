@@ -7591,6 +7591,10 @@ body.hide-recipe-card-rating #workflow-list .recipe-rating {
   padding: 0 4px;
 }
 
+#shot-review-modal .bean-field-group-title {
+  text-transform: none;
+}
+
 .bean-field-list {
   background: var(--c-bg-2);
   border-radius: 12px;
@@ -8916,11 +8920,96 @@ body.hide-recipe-card-rating #workflow-list .recipe-rating {
   flex-shrink: 0;
   width: 14px;
   height: 14px;
-  color: #FFD60A;
-  fill: #FFD60A;
+  color: #FF3B30;
+  fill: #FF3B30;
 }
 
 /* ── Shot Review Modal ───────────────────────────────── */
+
+/* Center the meta pill in the whole header; put the reference button at the
+   center of the right half (Close and Save stay pinned to the edges). */
+#shot-review-modal .modal-header {
+  position: relative;
+}
+
+#shot-review-modal .shot-review-meta {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(340px, 46vw);
+  max-width: none;
+  justify-content: space-between;
+}
+
+/* Text fills the middle so the ‹ › arrows stay pinned to the pill edges
+   regardless of the date/duration/dose content between them. */
+#shot-review-modal .shot-review-meta .workflow-shot-meta-text {
+  flex: 1;
+  min-width: 0;
+}
+
+#shot-review-modal .shot-review-ref-btn {
+  position: absolute;
+  left: 75%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.shot-review-ref-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 0.5px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--c-label-2);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.shot-review-ref-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.shot-review-ref-btn.is-active {
+  background: rgba(10, 132, 255, 0.18);
+  border-color: rgba(10, 132, 255, 0.5);
+  color: var(--c-blue);
+}
+
+/* Reuse the recipe page's shot-meta pill; just fit it into the modal header.
+   Capped so the centered pill clears the reference button at the right-half centre. */
+.shot-review-meta {
+  min-width: 0;
+  max-width: 38%;
+  gap: 6px;
+}
+
+.shot-review-meta .workflow-shot-nav-btn {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+}
+
+.shot-review-meta .workflow-shot-meta-text {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.shot-review-meta .workflow-shot-meta-row {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
 
 .shot-review-body {
   flex: 1;
@@ -9039,12 +9128,12 @@ body.hide-recipe-card-rating #workflow-list .recipe-rating {
 }
 
 .shot-review-fav-btn.is-fav {
-  background: rgba(255, 214, 10, 0.14);
+  background: rgba(255, 59, 48, 0.14);
 }
 
 .shot-review-fav-btn.is-fav svg {
-  fill: #FFD60A;
-  stroke: #FFD60A;
+  fill: #FF3B30;
+  stroke: #FF3B30;
 }
 
 .shot-review-fav-btn:active {
@@ -9059,28 +9148,36 @@ body.hide-recipe-card-rating #workflow-list .recipe-rating {
   min-width: 0;
 }
 
-.shot-review-rating-display {
+.shot-review-stars {
   display: flex;
-  align-items: baseline;
-  gap: 4px;
+  gap: 6px;
+  align-items: center;
 }
 
-.shot-review-rating-num {
-  font-size: var(--fs-title);
-  font-weight: 700;
-  color: var(--c-label);
-  line-height: 1;
+.sr-star {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
 }
 
-.shot-review-rating-num.is-none {
-  font-size: var(--fs-heading);
-  color: var(--c-label-3);
+.sr-star-svg {
+  width: 28px;
+  height: 28px;
+  display: block;
 }
 
-.shot-review-rating-max {
-  font-size: var(--fs-caption);
-  color: var(--c-label-3);
+.sr-star-bg polygon { fill: var(--c-separator); }
+
+.sr-star-fillwrap {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 28px;
+  overflow: hidden;
 }
+
+.sr-star-fill polygon { fill: #ffb400; }
 
 .shot-review-slider {
   --fill: 50%;

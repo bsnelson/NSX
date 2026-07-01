@@ -125,6 +125,34 @@ function makeGradFill(r, g, b, alpha = 0.16) {
   };
 }
 
+// Faded ("ghost") variant of a #rrggbb colour, for the reference-shot overlay.
+function _fadeHex(hex, alpha) {
+  const h = String(hex).replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Linear-resample a reference series (refX→refY) onto targetX (the current shot's
+// elapsed grid). Returns null outside the reference's time range so the line stops.
+function _resampleSeries(refX, refY, targetX) {
+  const n = refX?.length || 0;
+  const out = new Array(targetX.length).fill(null);
+  if (!n || !Array.isArray(refY)) return out;
+  let j = 0;
+  for (let i = 0; i < targetX.length; i++) {
+    const t = targetX[i];
+    if (!Number.isFinite(t) || t < refX[0] || t > refX[n - 1]) { out[i] = null; continue; }
+    while (j < n - 1 && refX[j + 1] < t) j++;
+    const k = Math.min(j + 1, n - 1);
+    const x0 = refX[j], x1 = refX[k], y0 = refY[j], y1 = refY[k];
+    if (!Number.isFinite(y0)) { out[i] = Number.isFinite(y1) ? y1 : null; continue; }
+    out[i] = (x1 === x0 || !Number.isFinite(y1)) ? y0 : y0 + (y1 - y0) * ((t - x0) / (x1 - x0));
+  }
+  return out;
+}
+
 const DEFAULT_SERIES_VISIBILITY = {
   pressure: true,
   flow: true,
@@ -1339,6 +1367,28 @@ function renderShotGraph(graphEl, shot, workflow, seriesVisibility, navContext, 
   setSeriesVisibility(mode, visibility);
   const opts = createChartOpts(width, height, visibility);
 
+  // Reference-shot overlay: same per-metric colours, ghosted (faded, thinner, no
+  // fill, solid) so it reads as background behind the current shot. Resampled onto
+  // the current shot's elapsed grid because uPlot needs one shared x-axis.
+  const ref = graphEl._referenceNormalized;
+  if (ref && Array.isArray(ref.elapsed) && ref.elapsed.length) {
+    const tx = normalized.elapsed;
+    const refSpline = uPlot.paths.spline?.();
+    const A = 0.4;
+    data.push(
+      _resampleSeries(ref.elapsed, ref.pressure,    tx),
+      _resampleSeries(ref.elapsed, ref.flow,        tx),
+      _resampleSeries(ref.elapsed, ref.scaleRate,   tx),
+      _resampleSeries(ref.elapsed, ref.temperature, tx),
+    );
+    opts.series.push(
+      { label: 'Ref Pressure', stroke: _fadeHex(CHART_COLORS.pressure, A),   width: 1.5, paths: refSpline, scale: 'pressure', points: { show: false }, show: visibility.pressure    !== false },
+      { label: 'Ref Flow',     stroke: _fadeHex(CHART_COLORS.flow, A),       width: 1.5, paths: refSpline, scale: 'pressure', points: { show: false }, show: visibility.flow        !== false },
+      { label: 'Ref Scale',    stroke: _fadeHex(CHART_COLORS.weightRate, A), width: 1.5, paths: refSpline, scale: 'pressure', points: { show: false }, show: visibility.scaleRate   !== false },
+      { label: 'Ref Temp',     stroke: _fadeHex(CHART_COLORS.temperature, A),width: 1.5, paths: refSpline, scale: 'temp',     points: { show: false }, show: visibility.temperature !== false },
+    );
+  }
+
   try {
     const chart = new uPlot(opts, data, graphEl);
     graphEl._chart = chart;
@@ -1520,7 +1570,7 @@ function _historyFormatDate(timestamp) {
   return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-const _starFilledSvg = `<svg class="history-shot-fav" viewBox="0 0 24 24" fill="#FFD60A" stroke="#FFD60A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-label="Favorit"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+const _starFilledSvg = `<svg class="history-shot-fav" viewBox="0 0 24 24" fill="#FF3B30" stroke="#FF3B30" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-label="Favorit"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`;
 
 function _esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -1529,6 +1579,12 @@ function _esc(s) {
 function _recipeKey(w) {
   return [w.coffeeRoaster, w.coffeeName, w.grinderModel, w.profileTitle]
     .map(v => String(v || '—').trim().toLocaleLowerCase('de-DE')).join('||');
+}
+
+// Render a 0–100 enjoyment value as 5 half-fillable stars (each star = 20).
+function _starRatingHtml(val) {
+  const fill = Math.round((Number(val) || 0) / 10) * 10; // nearest half-star (10% per half)
+  return `<span class="rating-stars" style="--fill:${fill}%"><span class="rating-stars-bg">★★★★★</span><span class="rating-stars-fg">★★★★★</span></span>`;
 }
 
 function _renderRecipeRating(key, max, count) {
@@ -1595,7 +1651,7 @@ function _renderShotRows(shots, { showRecipe = false } = {}) {
       ? `${dose}g → ${yieldLabel} (1:${(yield_ / dose).toFixed(1)})`
       : '—';
     const rating = ann.enjoyment ?? shot.metadata?.rating ?? (shot.rating != null ? shot.rating : null);
-    const ratingDisplay = rating != null ? String(rating) : '—';
+    const ratingDisplay = rating != null ? _starRatingHtml(rating) : '<span class="history-shot-value">—</span>';
     const isFav  = ann.extras?.favorite ?? shot.metadata?.favorite === true;
     const date   = _historyFormatDate(shot.timestamp);
     const tags   = Array.isArray(ann.extras?.tags) ? ann.extras.tags
@@ -1624,7 +1680,7 @@ function _renderShotRows(shots, { showRecipe = false } = {}) {
       <span class="history-shot-rating-cell">
         <span class="history-shot-label">${t('history.rating')}</span>
         <span class="history-shot-rating-row">
-          <span class="history-shot-value">${ratingDisplay}</span>
+          ${ratingDisplay}
           ${isFav ? _starFilledSvg : ''}
         </span>
       </span>

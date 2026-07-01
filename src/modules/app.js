@@ -4809,6 +4809,9 @@ let _historyServerResults = null;
 let _historySearchTimer = null;
 let _shotsTotalCount = 0;
 let _historyViewMode = 'recipe'; // 'recipe' (accordion) | 'shots' (flat, by date)
+// Ordered shot list backing the review's prev/next nav — the expanded recipe's
+// shots in recipe mode, or the full filtered/sorted flat list in date mode.
+let _historyCurrentShotList = [];
 const _historyFilters = { roasters: new Set(), beans: new Set(), grinders: new Set(), profiles: new Set(), favoritesOnly: false, minRating: 0 };
 
 function _hasActiveHistoryFilters() {
@@ -4983,6 +4986,7 @@ function renderHistoryShotsList() {
   let list = _filterShotsByFavAndRating(raw);
   list = _filterShotsByChips(list);
   list = [...list].sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+  _historyCurrentShotList = list;
   renderHistoryShotList?.(list);
   _loadHistoryShotDurations(list);
   _updateLoadMoreButton();
@@ -4998,6 +5002,7 @@ function renderHistory() {
   if (historySelectedRecipeIndex >= 0 && historySelectedRecipeIndex < filtered.length) {
     selectedShots = findShotsForHistoryWorkflow(filtered[historySelectedRecipeIndex], source);
   }
+  _historyCurrentShotList = selectedShots || [];
   renderHistoryAccordion?.(filtered, historySelectedRecipeIndex, selectedShots);
   // Only fetch authoritative per-recipe ratings when the History tab is actually
   // shown — avoids a burst of /shots requests during the startup pre-render.
@@ -5416,13 +5421,11 @@ window.addEventListener('router:tabchange', e => {
 /* ── Shot Review Modal ───────────────────────────────── */
 
 const shotReviewModalEl  = document.getElementById('shot-review-modal');
-const shotReviewTitleEl  = document.getElementById('shot-review-title');
 const shotReviewGraphEl  = document.getElementById('shot-review-graph');
 const shotReviewRecipeGridEl  = document.getElementById('shot-review-recipe-grid');
 const shotReviewResultsGridEl = document.getElementById('shot-review-results-grid');
 const shotReviewRatingEl    = document.getElementById('shot-review-rating');
-const shotReviewRatingValEl = document.getElementById('shot-review-rating-val');
-const shotReviewRatingMaxEl = document.getElementById('shot-review-rating-max');
+const shotReviewStarsEl     = document.getElementById('shot-review-stars');
 const shotReviewFavBtn      = document.getElementById('btn-shot-review-fav');
 const shotReviewNotesEl     = document.getElementById('shot-review-notes');
 const shotReviewTagsEl      = document.getElementById('shot-review-tags');
@@ -5465,6 +5468,103 @@ let _reviewRating  = null;
 let _reviewFav     = false;
 let _reviewDraft   = null;
 let _reviewAnalysisRows = [];
+// Prev/next navigation through the shot list the review was opened from
+// (recipe-scoped when opened in recipe mode, the full flat list in date mode).
+let _reviewNavShots = [];
+let _reviewNavIndex = -1;
+let _reviewInitialSig = '';
+let _reviewMetaDate = null;
+// Reference-shot overlay: when active, the shot picked as reference is drawn
+// (ghosted) behind whatever shot is currently displayed.
+let _reviewReferenceActive = false;
+let _reviewReferenceId = null;
+let _reviewReferenceFull = null;
+let _reviewCurrentFull = null;
+
+function _updateReferenceBtn() {
+  document.getElementById('btn-shot-review-reference')
+    ?.classList.toggle('is-active', _reviewReferenceActive);
+}
+
+// Re-render the current shot's graph, applying the reference overlay if active
+// (skipped when the current shot *is* the reference).
+function _rerenderReviewGraph() {
+  if (!shotReviewGraphEl || !_reviewCurrentFull) return;
+  shotReviewGraphEl._referenceNormalized =
+    (_reviewReferenceActive && _reviewReferenceFull && _reviewReferenceId !== _reviewShotId)
+      ? normalizeShotData(_reviewReferenceFull) : null;
+  renderShotGraph?.(shotReviewGraphEl, _reviewCurrentFull, null, undefined, null, null, normalizeShotData, 'history');
+}
+
+const _SR_GEAR_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="vertical-align:-1px"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+
+// Build the two-row shot-meta pill (matches the recipe page's date picker):
+//   row 1: "Di 30.06. | 14:36 | 8.2s"   row 2: "⚙ 10 · 10g → 30.3g (1:3.1)"
+function _renderReviewMeta() {
+  const mainEl = document.getElementById('shot-review-meta-main');
+  const subEl  = document.getElementById('shot-review-meta-sub');
+  const d = _reviewDraft || {};
+  const date = _reviewMetaDate;
+  const valid = date instanceof Date && !Number.isNaN(date.getTime());
+  const day  = valid ? new Intl.DateTimeFormat('de-DE', { weekday: 'short' }).format(date) : '--';
+  const dstr = valid ? new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit' }).format(date) : '--.--.';
+  const time = valid ? new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' }).format(date) : '--:--';
+  const durTxt = Number.isFinite(d.durationSec) ? `${d.durationSec.toFixed(1)}s` : '--.-s';
+  if (mainEl) mainEl.textContent = `${day} ${dstr} | ${time} | ${durTxt}`;
+
+  const grind = (d.grinderSetting ?? '') !== '' ? d.grinderSetting : null;
+  const dose  = Number.isFinite(d.actualDoseWeight) ? d.actualDoseWeight : null;
+  const out   = Number.isFinite(d.outValue) ? d.outValue : null;
+  const unit  = d.outUnit || 'g';
+  const est   = d.outEstimated === true;
+  const grindStr = grind != null ? `${_SR_GEAR_SVG} ${_escapeHtml(String(grind))}` : null;
+  const doseStr  = dose != null ? `${dose.toFixed(0)}g` : '—';
+  const outStr   = out != null ? `${est ? '~' : ''}${est ? Math.round(out) : out.toFixed(1)}${unit}` : '—';
+  const ratioStr = dose != null && out != null && dose > 0 ? ` (1:${(out / dose).toFixed(1)})` : '';
+  const row2 = [grindStr, `${doseStr} → ${outStr}${ratioStr}`].filter(Boolean).join(' · ');
+  if (subEl) subEl.innerHTML = row2;
+}
+
+// Signature of the user-editable review state, for detecting unsaved edits.
+function _reviewStateSig() {
+  const d = _reviewDraft || {};
+  return JSON.stringify({
+    r: _reviewRating,
+    f: _reviewFav,
+    t: _reviewTags,
+    n: shotReviewNotesEl?.value ?? '',
+    cr: d.coffeeRoaster, cn: d.coffeeName, gm: d.grinderModel, gs: d.grinderSetting,
+    dose: d.actualDoseWeight, ty: d.targetYield, tds: d.drinkTds, ey: d.drinkEy,
+  });
+}
+
+function _isReviewDirty() {
+  return _reviewStateSig() !== _reviewInitialSig;
+}
+
+function _updateReviewNav() {
+  const prevBtn = document.getElementById('btn-shot-review-prev');
+  const nextBtn = document.getElementById('btn-shot-review-next');
+  const has = _reviewNavShots.length > 1 && _reviewNavIndex >= 0;
+  if (prevBtn) {
+    prevBtn.hidden = !has;
+    prevBtn.disabled = !(has && _reviewNavIndex < _reviewNavShots.length - 1);
+  }
+  if (nextBtn) {
+    nextBtn.hidden = !has;
+    nextBtn.disabled = !(has && _reviewNavIndex > 0);
+  }
+}
+
+// delta: +1 = older shot (prev/‹), -1 = newer shot (next/›)
+async function _navigateReview(delta) {
+  const list = _reviewNavShots;
+  const target = _reviewNavIndex + delta;
+  if (!Array.isArray(list) || target < 0 || target >= list.length) return;
+  if (_isReviewDirty() && !await showConfirm(t('profileEditor.discardChanges'), t('action.discard'))) return;
+  const nextShot = list[target];
+  if (nextShot?.id) openShotReview(nextShot.id, list);
+}
 
 function _srTile(field, label, value, { editable = true, inputMode = 'text' } = {}) {
   const isEmpty = value === '' || value === null || value === undefined;
@@ -5531,34 +5631,49 @@ function _setShotReviewFav(val) {
   shotReviewFavBtn?.classList.toggle('is-fav', val);
 }
 
+const _SR_STAR_POINTS = '12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2';
+
+// Render the 0–100 enjoyment value as 5 half-fillable stars (each star = 20).
+function _renderReviewStars(val) {
+  if (!shotReviewStarsEl) return;
+  const stars = (Number(val) || 0) / 20; // 0..5
+  let html = '';
+  for (let i = 0; i < 5; i++) {
+    const pct = Math.max(0, Math.min(1, stars - i)) * 100;
+    html +=
+      `<span class="sr-star">` +
+      `<svg class="sr-star-svg sr-star-bg" viewBox="0 0 24 24" aria-hidden="true"><polygon points="${_SR_STAR_POINTS}"/></svg>` +
+      `<span class="sr-star-fillwrap" style="width:${pct}%"><svg class="sr-star-svg sr-star-fill" viewBox="0 0 24 24" aria-hidden="true"><polygon points="${_SR_STAR_POINTS}"/></svg></span>` +
+      `</span>`;
+  }
+  shotReviewStarsEl.innerHTML = html;
+}
+
 function _setShotReviewRating(val) {
   const isNone = val == null;
   _reviewRating = isNone ? null : val;
   const fill = isNone ? 0 : val;
-  if (shotReviewRatingValEl) {
-    shotReviewRatingValEl.textContent = isNone ? t('shotReview.noRating') : val;
-    shotReviewRatingValEl.classList.toggle('is-none', isNone);
-  }
-  if (shotReviewRatingMaxEl) shotReviewRatingMaxEl.hidden = isNone;
+  _renderReviewStars(fill);
   if (shotReviewRatingEl) {
     shotReviewRatingEl.value = fill;
     shotReviewRatingEl.style.setProperty('--fill', `${fill}%`);
   }
 }
 
-function openShotReview(shotId) {
+function openShotReview(shotId, navList = null) {
   const shot = shots.find(s => s.id === shotId)
-    ?? historyShots.find(s => s.id === shotId);
+    ?? historyShots.find(s => s.id === shotId)
+    ?? (Array.isArray(navList) ? navList.find(s => s.id === shotId) : null);
   if (!shot || !shotReviewModalEl) return;
 
   _reviewShotId = shotId;
+  _reviewNavShots = Array.isArray(navList) ? navList : [];
+  _reviewNavIndex = _reviewNavShots.findIndex(s => s.id === shotId);
+  _updateReviewNav();
+  _updateReferenceBtn();
 
   const ctx = shot.workflow?.context || {};
-  const date = new Date(shot.timestamp);
-  const dateStr = isNaN(date.getTime()) ? '—'
-    : date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-  if (shotReviewTitleEl)  shotReviewTitleEl.textContent = dateStr;
+  _reviewMetaDate = new Date(shot.timestamp);
 
   const ann = shot.annotations ?? {};
   // The review edits the actual shot's dose (annotations.actualDoseWeight), the same
@@ -5591,8 +5706,10 @@ function openShotReview(shotId) {
     outValue:         undefined, // undefined = loading, null = no data, number = actual out
     outUnit:          'g',
     outEstimated:     false,
+    durationSec:      null,
   };
   _renderShotReviewFields();
+  _renderReviewMeta();
 
   const initRating = ann.enjoyment ?? shot.metadata?.rating ?? null;
   const initFav    = ann.extras?.favorite ?? shot.metadata?.favorite === true;
@@ -5601,6 +5718,7 @@ function openShotReview(shotId) {
   _setShotReviewFav(initFav);
   if (shotReviewNotesEl) shotReviewNotesEl.value = ann.espressoNotes ?? shot.metadata?.notes ?? '';
   _renderReviewTags();
+  _reviewInitialSig = _reviewStateSig();
 
   const workflowTagsGroupEl = document.getElementById('shot-review-workflow-tags-group');
   const workflowTagsEl      = document.getElementById('shot-review-workflow-tags');
@@ -5647,6 +5765,7 @@ function openShotReview(shotId) {
       if (_reviewShotId !== shotId || !_reviewDraft) return;
       const secs = getShotDurationSeconds(fullShot);
       _reviewDraft.dispDuration = Number.isFinite(secs) ? `${secs.toFixed(0)} s` : '—';
+      _reviewDraft.durationSec = Number.isFinite(secs) ? secs : null;
 
       let actualOut = null;
       let outUnit = 'g';
@@ -5679,8 +5798,13 @@ function openShotReview(shotId) {
 
       _reviewAnalysisRows = window.NSXUI?.renderShotAnalysis(normalizeShotData(fullShot)) || [];
       _renderShotReviewFields();
+      _renderReviewMeta();
 
+      _reviewCurrentFull = fullShot;
       if (shotReviewGraphEl) {
+        shotReviewGraphEl._referenceNormalized =
+          (_reviewReferenceActive && _reviewReferenceFull && _reviewReferenceId !== shotId)
+            ? normalizeShotData(_reviewReferenceFull) : null;
         requestAnimationFrame(() => {
           renderShotGraph?.(shotReviewGraphEl, fullShot, null, undefined, null, null, normalizeShotData, 'history');
         });
@@ -5694,12 +5818,21 @@ function openShotReview(shotId) {
       _reviewDraft.outUnit      = 'g';
       _reviewDraft.outEstimated = estYield != null;
       _renderShotReviewFields();
+      _renderReviewMeta();
     });
 }
 
 function closeShotReview() {
   if (shotReviewModalEl) shotReviewModalEl.hidden = true;
   _reviewShotId = null;
+  _reviewNavShots = [];
+  _reviewNavIndex = -1;
+  _reviewReferenceActive = false;
+  _reviewReferenceId = null;
+  _reviewReferenceFull = null;
+  _reviewCurrentFull = null;
+  if (shotReviewGraphEl) shotReviewGraphEl._referenceNormalized = null;
+  _updateReferenceBtn();
 }
 
 shotReviewRatingEl?.addEventListener('input', () => {
@@ -5738,6 +5871,25 @@ shotReviewFavBtn?.addEventListener('click', () => {
 });
 
 document.getElementById('btn-shot-review-close')?.addEventListener('click', closeShotReview);
+document.getElementById('btn-shot-review-prev')?.addEventListener('click', () => _navigateReview(+1));
+document.getElementById('btn-shot-review-next')?.addEventListener('click', () => _navigateReview(-1));
+
+document.getElementById('btn-shot-review-reference')?.addEventListener('click', async () => {
+  if (_reviewReferenceActive) {
+    _reviewReferenceActive = false;
+    _reviewReferenceId = null;
+    _reviewReferenceFull = null;
+  } else {
+    _reviewReferenceActive = true;
+    _reviewReferenceId = _reviewShotId;
+    _reviewReferenceFull = _reviewCurrentFull || shotDetailsCache.get(_reviewShotId) || null;
+    if (!_reviewReferenceFull && _reviewShotId) {
+      try { _reviewReferenceFull = await getShotDetailsCached(_reviewShotId); } catch {}
+    }
+  }
+  _updateReferenceBtn();
+  _rerenderReviewGraph();
+});
 
 document.getElementById('btn-shot-review-tag-add')?.addEventListener('click', () => {
   // Reuse the field picker: it provides the custom keyboard plus a filterable
@@ -5826,7 +5978,7 @@ document.getElementById('btn-shot-review-save')?.addEventListener('click', async
 document.getElementById('history-accordion-list')?.addEventListener('click', e => {
   if (e.target.closest('.history-shot-delete-btn')) return;
   const row = e.target.closest('.history-shot-row');
-  if (row?.dataset.shotId) openShotReview(row.dataset.shotId);
+  if (row?.dataset.shotId) openShotReview(row.dataset.shotId, _historyCurrentShotList);
 });
 
 /* ── History Shortcut Button ────────────────────────── */
@@ -5841,7 +5993,7 @@ document.getElementById('btn-workflow-history-shortcut')?.addEventListener('clic
   const navIdx = Number(graphEl?._shotNav?.index);
   const idx = Number.isInteger(navIdx) ? Math.max(0, Math.min(navIdx, matching.length - 1)) : 0;
   const shot = matching[idx] || matching[0];
-  if (shot?.id) openShotReview(shot.id);
+  if (shot?.id) openShotReview(shot.id, matching);
 });
 
 /* ── Workflow Edit Modal ──────────────────────────────── */
