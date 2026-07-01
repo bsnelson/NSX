@@ -1435,17 +1435,40 @@ function renderShotGraph(graphEl, shot, workflow, seriesVisibility, navContext, 
 
     const _onPointerMove  = e => _showAtClientX(e.clientX);
     const _onPointerLeave = () => _resetLegend();
-    const _onTouchMove    = e => { e.preventDefault(); _showAtClientX(e.touches[0].clientX); };
-    const _onTouchEnd     = () => _resetLegend();
+    // Decide per gesture: a horizontal drag scrubs the crosshair (preventDefault),
+    // a vertical drag is left alone so the surrounding container can scroll.
+    let _touchStartX = 0, _touchStartY = 0, _touchMode = null; // null | 'scrub' | 'scroll'
+    const _onTouchStart = e => {
+      const t0 = e.touches[0];
+      _touchStartX = t0.clientX;
+      _touchStartY = t0.clientY;
+      _touchMode = null;
+    };
+    const _onTouchMove = e => {
+      const t0 = e.touches[0];
+      if (_touchMode === null) {
+        const dx = Math.abs(t0.clientX - _touchStartX);
+        const dy = Math.abs(t0.clientY - _touchStartY);
+        if (dx < 6 && dy < 6) return; // too small to classify yet
+        _touchMode = dx > dy ? 'scrub' : 'scroll';
+      }
+      if (_touchMode === 'scrub') {
+        e.preventDefault();
+        _showAtClientX(t0.clientX);
+      }
+    };
+    const _onTouchEnd     = () => { _touchMode = null; _resetLegend(); };
 
     graphEl.addEventListener('pointermove',  _onPointerMove);
     graphEl.addEventListener('pointerleave', _onPointerLeave);
+    graphEl.addEventListener('touchstart',   _onTouchStart, { passive: true });
     graphEl.addEventListener('touchmove',    _onTouchMove, { passive: false });
     graphEl.addEventListener('touchend',     _onTouchEnd,  { passive: true });
 
     graphEl._removeCursorListeners = () => {
       graphEl.removeEventListener('pointermove',  _onPointerMove);
       graphEl.removeEventListener('pointerleave', _onPointerLeave);
+      graphEl.removeEventListener('touchstart',   _onTouchStart);
       graphEl.removeEventListener('touchmove',    _onTouchMove);
       graphEl.removeEventListener('touchend',     _onTouchEnd);
       delete graphEl._removeCursorListeners;

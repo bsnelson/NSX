@@ -8982,6 +8982,14 @@ body.hide-recipe-card-rating #workflow-list .recipe-rating {
   border-radius: 0;
 }
 
+/* Let vertical swipes over the (non-interactive) graph scroll the review body. */
+.shot-review-graph-wrap,
+.shot-review-graph-wrap .u-wrap,
+.shot-review-graph-wrap .u-over,
+.shot-review-graph-wrap canvas {
+  touch-action: pan-y;
+}
+
 .shot-review-graph-wrap .workflow-legend {
   justify-content: center;
   padding: 6px 0 4px;
