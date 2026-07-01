@@ -506,8 +506,17 @@ function createLegendControl(key, label, isActive) {
   `;
 }
 
+// The shot review renders its legend into a dedicated slot (flanked by the date
+// picker and reference button) instead of inside the graph wrap.
+function _legendHostFor(graphEl) {
+  if (graphEl?.id === 'shot-review-graph') {
+    return document.getElementById('shot-review-legend-host') || graphEl.parentElement || graphEl;
+  }
+  return graphEl?.parentElement || graphEl;
+}
+
 function renderShotLegend(graphEl, visibility, onToggle, navContext) {
-  const host = graphEl.parentElement || graphEl;
+  const host = _legendHostFor(graphEl);
   const existing = host.querySelector('.workflow-legend');
   if (existing) existing.remove();
 
@@ -543,11 +552,12 @@ function renderShotLegend(graphEl, visibility, onToggle, navContext) {
     legend.appendChild(skipBtn);
   }
 
-  host.insertBefore(legend, graphEl);
+  if (host.contains(graphEl)) host.insertBefore(legend, graphEl);
+  else host.appendChild(legend);
 }
 
 function updateWorkflowLegendLive(graphEl, vals) {
-  const legend = graphEl?.parentElement?.querySelector('.workflow-legend');
+  const legend = _legendHostFor(graphEl)?.querySelector('.workflow-legend');
   if (!legend) return;
   const fmt = {
     pressure:    Number.isFinite(vals.pressure)                         ? `${vals.pressure.toFixed(1)} bar`  : '— bar',
@@ -1423,7 +1433,7 @@ function renderShotGraph(graphEl, shot, workflow, seriesVisibility, navContext, 
     // Remove any cursor listeners from a previous renderShotGraph call on this element
     graphEl._removeCursorListeners?.();
 
-    const _legendHost = graphEl.parentElement || graphEl;
+    const _legendHost = _legendHostFor(graphEl);
     const _origLabels = {};
     let _origCaptured = false;
 
