@@ -101,7 +101,21 @@ const {
 } = window.NSXUI || {};
 
 /* ── Translations ─────────────────────────────────────── */
-const { t, setLang, getLang, applyTranslations } = window.NSXI18n || {};
+const { t, setLang, getLang } = window.NSXI18n || {};
+
+// Apply the current language to this skin's data-i18n DOM (core's NSXI18n is
+// DOM-free and only provides t()/setLang()/getLang()).
+function applyTranslations() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    el.placeholder = t(el.dataset.i18nPlaceholder);
+  });
+  document.querySelectorAll('[data-i18n-aria]').forEach(el => {
+    el.setAttribute('aria-label', t(el.dataset.i18nAria));
+  });
+}
 
 /* ── Confirm Dialog ───────────────────────────────────── */
 function showConfirm(message, okLabel = null) {

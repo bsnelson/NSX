@@ -301,7 +301,8 @@ export interface NSXApi {
 }
 
 export interface NSXConfig { GATEWAY?: string; WS_BASE?: string; [k: string]: any; }
-export interface NSXI18n { t(key: string): string; [k: string]: any; }
+/** DOM-free: dictionary + lookup only. Applying to data-i18n DOM is skin-side. */
+export interface NSXI18n { t(key: string): string; setLang(lang: string): void; getLang(): string; }
 
 declare global {
   interface Window {

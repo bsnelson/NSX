@@ -1349,17 +1349,8 @@ function getLang() {
   return _lang;
 }
 
-function applyTranslations() {
-  document.querySelectorAll('[data-i18n]').forEach(el => {
-    el.textContent = t(el.dataset.i18n);
-  });
-  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
-    el.placeholder = t(el.dataset.i18nPlaceholder);
-  });
-  document.querySelectorAll('[data-i18n-aria]').forEach(el => {
-    el.setAttribute('aria-label', t(el.dataset.i18nAria));
-  });
-}
-
-window.NSXI18n = { t, setLang, getLang, applyTranslations };
+// NSXI18n is DOM-free: it provides the dictionary + lookup only. Applying
+// translations to `data-i18n` DOM elements is a skin concern (each skin walks
+// its own DOM / template and calls t()). NSX does this in app.js.
+window.NSXI18n = { t, setLang, getLang };
 })();
