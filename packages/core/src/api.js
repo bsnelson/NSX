@@ -13,7 +13,8 @@
 (() => {
 const { GATEWAY, WS_BASE } = window.NSXConfig || {};
 
-const weightEl = document.getElementById("scale-weight");
+// api.js is DOM-free: the live scale weight is published via the "scale:weight"
+// and "scale:status" events; each skin renders its own weight display from those.
 
 let scaleWs;
 let waterWs;
@@ -120,22 +121,17 @@ function connectScale() {
       const d = JSON.parse(e.data);
 
       if (d?.status === "connected") {
-        weightEl.classList.remove("offline");
         emitScaleStatus(true);
         return;
       }
 
       if (d?.status === "disconnected") {
-        weightEl.classList.add("offline");
-        weightEl.textContent = "–";
         emitScaleStatus(false);
         return;
       }
 
       if (Number.isFinite(d.weight)) {
-        weightEl.classList.remove("offline");
         emitScaleStatus(true);
-        weightEl.textContent = `${d.weight.toFixed(1)} g`;
         window.dispatchEvent(new CustomEvent("scale:weight", {
           detail: { weight: d.weight, weightFlow: d.weightFlow ?? null },
         }));
@@ -146,8 +142,6 @@ function connectScale() {
   };
 
   scaleWs.onclose = () => {
-    weightEl.classList.add("offline");
-    weightEl.textContent = "–";
     emitScaleStatus(false);
     if (scaleAutoReconnect) {
       setTimeout(connectScale, reconnectDelay);

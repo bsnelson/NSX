@@ -1562,6 +1562,12 @@ NSXCore.on("scaleConnected", (connected) => {
   const wasConnected = scaleConnected;
   scaleConnected = Boolean(connected);
   setScaleConnected(scaleConnected);
+  // Machine-status weight readout (formerly written by core api.js, now skin-side).
+  const scaleWeightEl = document.getElementById('scale-weight');
+  if (scaleWeightEl) {
+    scaleWeightEl.classList.toggle('offline', !scaleConnected);
+    if (!scaleConnected) scaleWeightEl.textContent = '–';
+  }
   const toggle = document.getElementById('scale-connect-toggle');
   if (toggle) toggle.checked = scaleConnected;
   const scalePill = document.getElementById('workflow-scale-pill');
@@ -1601,6 +1607,12 @@ NSXCore.on("scaleWeight", (d) => {
   currentScaleRate = Number.isFinite(apiRate) && apiRate >= 0 ? apiRate : 0;
   liveWeight = newWeight;
   _maybeAutoTareNegative(newWeight);
+  // Machine-status weight readout (formerly written by core api.js, now skin-side).
+  const scaleWeightEl = document.getElementById('scale-weight');
+  if (scaleWeightEl) {
+    scaleWeightEl.textContent = `${newWeight.toFixed(1)} g`;
+    scaleWeightEl.classList.remove('offline');
+  }
   const scalePill = document.getElementById('workflow-scale-pill');
   if (scalePill) scalePill.textContent = scaleConnected ? newWeight.toFixed(1) + 'g' : '';
   const dosePill = document.getElementById('workflow-dose-pill');

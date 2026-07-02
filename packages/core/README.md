@@ -165,14 +165,11 @@ Then render from the store/domain selectors and update on events. Writes go thro
 commands (`NSXCore.setSteamTemp(...)`, `NSXCore.push(...)`, etc.), which persist
 and/or push to the gateway and emit `*Changed` events the UI re-renders from.
 
-> ⚠️ **Known DOM coupling in `api.js` (should be fixed before a 2nd skin).**
-> `api.js` is *supposed* to be DOM-free but currently does
-> `document.getElementById("scale-weight")` and writes the weight text/`offline`
-> class to that element directly (no null guard). A skin **without** an element
-> `id="scale-weight"` will hit a `TypeError` on the first scale-weight message.
-> The clean fix is to remove those DOM writes from core and have each skin render
-> the weight from the `scaleWeight` / `scaleConnected` events instead. Until then,
-> a consuming skin must provide a `#scale-weight` element.
+> **Scale weight is skin-rendered.** The live weight readout is *not* drawn by core
+> — a skin renders it from the `scaleWeight` (`{weight, weightFlow}`) and
+> `scaleConnected` (`boolean`) events into its own element. (NSX does this in its
+> `NSXCore.on("scaleWeight"/"scaleConnected", …)` handlers, updating its
+> `#scale-weight` element.) Core no longer touches the DOM at all.
 
 ## Event payloads (`NSXCore.on(name, cb)`)
 
