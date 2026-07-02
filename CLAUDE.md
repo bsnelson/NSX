@@ -31,11 +31,17 @@ espresso-skins/                     # repo root (npm workspaces)
 ├── scripts/sync-core.mjs           # copies packages/core/src -> packages/nsx/src/core
 ├── packages/
 │   ├── core/                       # shared, DOM-FREE package (SOURCE OF TRUTH)
+│   │   ├── README.md               # ← full NSXCore API docs (read this for core)
 │   │   ├── package.json
 │   │   └── src/
-│   │       ├── config.js           # Constants
-│   │       ├── api.js              # REST + WebSocket gateway communication
-│   │       └── translations.js     # i18n strings (DE + others)
+│   │       ├── config.js           # Constants (window.NSXConfig)
+│   │       ├── api.js              # REST + WebSocket gateway client (window.NSXApi)
+│   │       ├── translations.js     # i18n strings (window.NSXI18n)
+│   │       ├── core.js             # window.NSXCore — event bus + register() + api bridge
+│   │       ├── store.js            # settings store (stable storeSettings object)
+│   │       ├── push.js             # NSXCore.push / debounced helpers
+│   │       └── domains/            # steam, hotwater, flush, schedule, grinder, bean,
+│   │                               #   shot, profile, workflow, machine, mapping
 │   └── nsx/                         # NSX skin (vanilla JS, no build)
 │       ├── package.json
 │       └── src/                     # <-- served as the web root in dev & ZIP root
@@ -57,53 +63,61 @@ espresso-skins/                     # repo root (npm workspaces)
     └── release-nsx.yml             # Per-skin release (tag: nsx-v*) — assembles a self-contained ZIP
 ```
 
-> Function-index line numbers below refer to `packages/nsx/src/modules/app.js`.
 > **Edit core only in `packages/core/src`**, then `npm run sync-core` — never edit
 > `packages/nsx/src/core/` (it's overwritten).
 
-## app.js Function Index
+## Shared logic lives in NSXCore
 
-`app.js` (~11,200 lines) is the orchestrator. No section headers exist — use this table to navigate.
+A lot of what used to live in `app.js` now lives in the DOM-free core as
+`window.NSXCore` selectors/commands — see **[`packages/core/README.md`](packages/core/README.md)**
+for the full per-domain API. app.js keeps a thin same-named delegate for each so its
+call sites are unchanged, e.g. `const mapShotToWorkflow = (s) => NSXCore.mapShotToWorkflow(s)`.
 
-| Area | Key Functions | Lines |
-|------|--------------|-------|
-| **Dialogs / Formatters** | `showConfirm`, `showAlert`, `formatMmSs`, `formatShotDateShort` | 107–580 |
-| **Machine state guards** | `canExecuteOperation`, `_isEspressoLikeState`, `updateMachineStateBanner` | 203–280 |
-| **Workflow filters** | `getDisplayWorkflows`, `openFilterModal`, `buildFilterChips`, `updateFilterButtonState` | 284–385 |
-| **History filters** | `_openHistoryFilterModal`, `_handleHistoryChipClick`, `_updateHistoryFilterBtn` | 390–480 |
-| **Shot data helpers** | `normalizeShotData`, `getShotDetailsCached`, `getShotDurationSeconds`, `calcRatio`, `buildShotDiffData` | 486–830 |
-| **Workflow ↔ shot mapping** | `mapApiWorkflowToDisplay`, `mapShotToWorkflow`, `getWorkflowKey`, `buildWorkflowItemsFromShots`, `findShotsForWorkflow` | 505–880 |
-| **Recipe store** | `_loadRecipesFromStore`, `_saveRecipesToStore`, `_makeRecipeId` | 882–905 |
-| **Gateway payload** | `workflowToGatewayPayload`, `_buildRecipeGatewayPayload`, `pushSelectedWorkflowToMachine`, `_pushCurrentSkinStateToMachine` | 920–1082 |
-| **Workflow selection** | `selectWorkflow`, `plotWorkflowShot` | 1083–1245 |
-| **Espresso fullscreen** | `openEspressoFullscreen`, `closeEspressoFullscreen`, `updateEspressoFullscreen`, `_updateReserveWidget` | 1246–1383 |
-| **Live shot session** | `startLiveShotSession`, `endLiveShotSession`, `_runPostShotActions` (1469), `pollForNewShot` (1576) | 1384–1604 |
-| **Steam session** | `startSteamSession`, `endSteamSession` | 1605–1658 |
-| **Hot water session** | `startHotWaterSession`, `endHotWaterSession` | 1660–1683 |
-| **Flush session** | `startFlushSession`, `endFlushSession` | 1685–1728 |
-| **Water overlay** | `showNeedsWaterOverlay`, `hideNeedsWaterOverlay` | 1730–1740 |
-| **App init** | `loadApiData`, `tick`, `signalUserPresence`, `setupPresenceTracking`, `setupDisplayControl` | 1742–1865 |
-| **Machine/scale events** | WebSocket event handlers, `setMachineConnected`, `setScaleConnected` (imported from ui.js) | 1866–2200 |
-| **Skin settings UI** | `_applyTheme`, `_applySkinBrightness`, `_applyScale`, `_renderScaleControls`, `_renderPresenceSettingsUI` | 2281–2550 |
-| **Refill / viewport** | `applyRefillLevel`, `_setRealVh` | 3197–3290 |
-| **Settings persistence** | `patchStoreSettings`, `scheduleStorePersist`, `migrateLegacyLocalSettingsToStore` | 3287–3390 |
-| **Steam presets** | `loadSteamPresets`, `selectSteamPreset`, `_openSteamSettingsModal`, `_fetchAndShowLastSteam` | 3387–3795 |
-| **Hot water presets** | `loadHotwaterPresets`, `selectHotwaterPreset`, `_openHotwaterSettingsModal` | 3796–3970 |
-| **Flush presets** | `loadFlushPresets`, `selectFlushPreset`, `_openFlushSettingsModal` | 3971–4185 |
-| **Gateway push helpers** | `push`, `debounced`, `pushSteamTemp/Flow/Duration`, `pushHotwater`, `pushFlush` | 4187–4215 |
-| **Schedule** | `loadScheduleState`, `renderScheduleUI`, `syncScheduleToApi`, `applyScheduleState` | 4224–4545 |
-| **Swipe gestures** | `getSwipeLayer`, `closeAllSwipes`, `getHistorySwipeLayer`, `closeAllHistorySwipes` | 4545–4695 |
-| **History list** | `renderHistory`, `_loadMoreHistory`, `_filterShotsByFavAndRating`, `deleteWorkflowShots`, `_deleteHistoryShot` | 4694–4950 |
-| **Scale-based weighing** | `_applySbwEnabled`, `_sbwCalibFactor`, `_applyDoseScale`, `_updateSbwWidget`, `_updateScaleIndicatorVisibility` | 4949–5220 |
-| **Shot review** | `openShotReview`, `closeShotReview`, `_setShotReviewFav`, `_setShotReviewRating`, `_renderReviewTags` | 5221–5590 |
-| **Profile picker** | `openProfilePickerModal`, `_renderProfilePickerList`, `_setProfilePickerMode`, `_ensureProfilesLoaded` | 5588–7596 |
-| **Profile editor** | `openProfileEditorModal`, `_peditorSave`, `_peditorRenderFrames`, `_peditorBuildProfile`, `_profileSparkSvg` | 7596–8395 |
-| **Workflow edit/create** | `openWorkflowEditModal`, `openWorkflowCreateModal`, `_syncProfileDisplay`, `_importFromVisualizer` | 8395–9040 |
-| **Number / field pickers** | `openNumberPicker`, `closeNumberPicker`, `openFieldPicker`, `openSearchInputModal` | 9529–9905 |
-| **Bean manager** | `openBeanManagerModal`, `_beanManagerRenderDetail`, `_beanManagerSaveField`, `_beanManagerLoad` | 9146–10935 |
-| **Batch management** | `openBatchModal`, `loadAndRenderBatches`, `openBatchDatePickerModal` | 10018–10930 |
-| **Grinder manager** | `renderGrinderTiles`, `loadAndRenderGrinders`, `openMuehlenModal`, `openGrinderDetailModal` | 10936–11182 |
-| **Phone layout** | `_updatePhoneMachineCard`, `_selectPhoneTab`, `_applyPhoneLayout` | 11183–11207 |
+**Already in core** (don't re-implement in app.js): all machine-function presets
+(steam / hotwater / flush) + schedule; grinder / bean / shot / profile fetch+cache
++ CRUD; the recipe store and gateway-payload builders; machine state + the
+`canExecuteOperation` op-guard; and the pure shot/workflow **mapping** layer
+(`normalizeShotData`, `mapShotToWorkflow`, `getWorkflowKey`,
+`buildWorkflowItemsFromShots`, `findShotsForWorkflow`, `buildShotDiffData`,
+`getShotDurationSeconds`, `computeMaxRating`, formatters).
+
+**Rule for new code:** pure data transformation or business rule → core; DOM-fused
+or UI-shaped state → app.js. (Details + what deliberately stays in app.js:
+core README.)
+
+## app.js Function Areas
+
+`app.js` (~11k lines) is the orchestrator: global state, DOM rendering, event wiring,
+and everything below. No section headers exist and line numbers drift with every
+edit — **grep the function name** to locate it. What remains here is presentation +
+skin wiring (the shared logic moved to NSXCore, above):
+
+| Area | Key Functions |
+|------|--------------|
+| **Dialogs** | `showConfirm`, `showAlert` |
+| **Machine state banner** | `updateMachineStateBanner` (guard `canExecuteOperation` → NSXCore) |
+| **Workflow / history filters** | `getDisplayWorkflows`, `openFilterModal`, `buildFilterChips`, `_openHistoryFilterModal`, `_handleHistoryChipClick`, `_filterShotsByFavAndRating`, `_filterShotsByChips` |
+| **Gateway push** | `pushSelectedWorkflowToMachine`, `_pushCurrentSkinStateToMachine` (payload built by `NSXCore.buildGatewayPayload`) |
+| **Workflow selection** | `selectWorkflow`, `plotWorkflowShot` |
+| **Espresso fullscreen** | `openEspressoFullscreen`, `updateEspressoFullscreen`, `_updateReserveWidget` |
+| **Live shot session** | `startLiveShotSession`, `endLiveShotSession`, `_runPostShotActions`, `pollForNewShot` |
+| **Steam / hot water / flush sessions** | `start*Session` / `end*Session` (values via NSXCore preset domains) |
+| **App init** | `loadApiData`, `tick`, `signalUserPresence`, `setupPresenceTracking`, `setupDisplayControl` |
+| **Machine/scale events** | `NSXCore.on(...)` handlers; `setMachineConnected`/`setScaleConnected` (from ui.js) |
+| **Skin settings UI** | `_applyTheme`, `_applySkinBrightness`, `_applyScale`, `_renderScaleControls`, `_renderPresenceSettingsUI` |
+| **Settings persistence** | `patchStoreSettings` (→ `NSXCore.patchStore`), `scheduleStorePersist` |
+| **Preset UIs** | `loadSteamPresets`, `selectSteamPreset`, `_openSteamSettingsModal`, and hotwater/flush equivalents (DOM only; state in NSXCore) |
+| **Schedule UI** | `renderScheduleUI`, `applyScheduleState` (state/sync in NSXCore) |
+| **Swipe gestures** | `getSwipeLayer`, `closeAllSwipes`, `getHistorySwipeLayer`, `closeAllHistorySwipes` |
+| **History list** | `renderHistory`, `renderHistoryShotsList`, `_loadMoreHistory`, `deleteWorkflowShots`, `_deleteHistoryShot` |
+| **Scale-based weighing** | `_applySbwEnabled`, `_applyDoseScale`, `_updateSbwWidget`, `_updateScaleIndicatorVisibility` |
+| **Shot review** | `openShotReview`, `closeShotReview`, `_setShotReviewFav`, `_setShotReviewRating`, `_renderReviewTags`, `_navigateReview` |
+| **Profile picker / editor** | `openProfilePickerModal`, `_renderProfilePickerList`, `_setProfilePickerMode`, `openProfileEditorModal`, `_peditorSave`, `_peditorBuildProfile`, `_profileSparkSvg` (caches via NSXCore profile domain) |
+| **Workflow edit/create** | `openWorkflowEditModal`, `openWorkflowCreateModal`, `_importFromVisualizer` |
+| **Number / field / text pickers + keyboard** | `openNumberPicker`, `openFieldPicker`, `openTextEditorModal`, `_setupKeyboard` |
+| **Bean manager / batches** | `openBeanManagerModal`, `_beanManagerRenderDetail`, `_beanManagerSaveField`, `openBatchModal`, `formatBatchAge` (bean/grinder/shot data via NSXCore) |
+| **Grinder manager** | `renderGrinderTiles`, `loadAndRenderGrinders`, `openMuehlenModal` |
+| **Phone layout** | `_updatePhoneMachineCard`, `_selectPhoneTab`, `_applyPhoneLayout` |
 
 ---
 
