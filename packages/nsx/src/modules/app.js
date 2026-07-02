@@ -48,12 +48,10 @@ const {
   archiveBean,
   unarchiveBean,
   fetchProfiles,
-  fetchProfilesIncludingHidden,
   fetchProfileById,
   saveProfile,
   deleteProfile,
   setProfileVisibility,
-  fetchDeletedProfiles,
   purgeProfile,
   restoreProfile,
   fetchGrinders,
@@ -912,8 +910,9 @@ function _getLiveProfileFrames() {
   const title = profile?.title;
 
   // Prefer the profiles cache — it has frame names; the gateway payload often doesn't.
-  if (title && _profileRecordsCache) {
-    const match = _profileRecordsCache.find(r => String(r.profile?.title || '').trim() === title.trim());
+  const profileCache = NSXCore.getProfiles();
+  if (title && profileCache) {
+    const match = profileCache.find(r => String(r.profile?.title || '').trim() === title.trim());
     const cacheFrames = match?.profile?.steps ?? match?.profile?.frames;
     if (cacheFrames?.length) return cacheFrames;
   }
@@ -5505,9 +5504,6 @@ let _editBeanAgeRequestId = 0;
 let _originalIdentity = null;
 let _editSelectedProfileId = null;
 let _editSelectedProfileObj = null;
-let _profileRecordsCache = null;
-let _profileRecordsCacheAll = null;
-let _deletedProfilesCache = null;
 let _profilePickerSelectedRecord = null;
 let _profilePickerContext = 'editor'; // 'editor' | 'home'
 let _profileFavorites = new Set();
@@ -5751,55 +5747,15 @@ function _matchesProfileSearch(record, query) {
   return title.includes(q) || author.includes(q);
 }
 
-function _normalizeProfileRecord(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  if (raw.profile && typeof raw.profile === 'object') return raw;
-  const profile = raw.steps || raw.frames || raw.title ? raw : null;
-  if (!profile) return null;
-  return {
-    id: raw.id || null,
-    profile,
-    metadata: raw.metadata || null,
-    isDefault: raw.isDefault === true,
-  };
-}
-
-async function _ensureProfilesLoaded(force = false) {
-  if (!fetchProfiles) return [];
-  if (_profileRecordsCache?.length && !force) return _profileRecordsCache;
-  const data = await fetchProfiles();
-  const list = Array.isArray(data) ? data : (data?.items ?? data?.records ?? []);
-  const records = list
-    .map(_normalizeProfileRecord)
-    .filter(Boolean)
-    .filter(r => r.profile);
-  // Never cache an empty result: the gateway can transiently return no profiles
-  // (e.g. just after wake while it re-initializes). Caching [] would persist a
-  // broken state — every recipe push would then send a frameless profile.
-  if (records.length) _profileRecordsCache = records;
-  return records;
-}
-
-async function _ensureProfilesWithHiddenLoaded(force = false) {
-  if (_profileRecordsCacheAll?.length && !force) return _profileRecordsCacheAll;
-  const data = await fetchProfilesIncludingHidden();
-  const list = Array.isArray(data) ? data : (data?.items ?? data?.records ?? []);
-  const records = list.map(_normalizeProfileRecord).filter(Boolean).filter(r => r.profile);
-  if (records.length) _profileRecordsCacheAll = records;
-  return records;
-}
-
-async function _ensureDeletedProfilesLoaded(force = false) {
-  if (!fetchDeletedProfiles) return [];
-  if (_deletedProfilesCache && !force) return _deletedProfilesCache;
-  const data = await fetchDeletedProfiles();
-  const list = Array.isArray(data) ? data : (data?.items ?? data?.records ?? []);
-  _deletedProfilesCache = list
-    .map(_normalizeProfileRecord)
-    .filter(Boolean)
-    .filter(r => r.profile);
-  return _deletedProfilesCache;
-}
+// Profile caches (visible/all/deleted) + normalize + load now live in
+// core/domains/profile.js; these are thin delegates so the many call sites
+// below stay unchanged. Direct cache-variable reads/writes elsewhere in this
+// file use NSXCore.getProfiles()/getProfilesAll()/getDeletedProfiles() and
+// NSXCore.invalidateProfiles()/invalidateProfilesAll()/invalidateDeletedProfiles().
+const _normalizeProfileRecord = (raw) => NSXCore.normalizeProfileRecord(raw);
+const _ensureProfilesLoaded = (force = false) => NSXCore.loadProfiles(force);
+const _ensureProfilesWithHiddenLoaded = (force = false) => NSXCore.loadProfilesWithHidden(force);
+const _ensureDeletedProfilesLoaded = (force = false) => NSXCore.loadDeletedProfiles(force);
 
 function _profileMetrics(profile) {
   const frames = _extractFrames(profile);
@@ -6102,7 +6058,7 @@ function _setupProfileSparkInteraction(containerEl) {
 }
 
 function _findRecordById(id) {
-  return (_profileRecordsCache || []).find(r => String(r.id) === String(id));
+  return (NSXCore.getProfiles() || []).find(r => String(r.id) === String(id));
 }
 
 function _profileLooksActive(record) {
@@ -6222,17 +6178,17 @@ function _renderProfilePreview(record) {
     const currentlyHidden = btn?.getAttribute('data-hidden') === 'true';
     const newVisibility = currentlyHidden ? 'visible' : 'hidden';
     const srcList = currentlyHidden
-      ? (Array.isArray(_profileRecordsCacheAll) ? _profileRecordsCacheAll : []).filter(r => r.visibility === 'hidden')
-      : (Array.isArray(_profileRecordsCache) ? _profileRecordsCache : []);
+      ? (Array.isArray(NSXCore.getProfilesAll()) ? NSXCore.getProfilesAll() : []).filter(r => r.visibility === 'hidden')
+      : (Array.isArray(NSXCore.getProfiles()) ? NSXCore.getProfiles() : []);
     const nextId = _pickNextId(srcList, profileId);
     try {
       await setProfileVisibility(profileId, newVisibility);
-      _profileRecordsCache = null;
-      _profileRecordsCacheAll = null;
+      NSXCore.invalidateProfiles();
+      NSXCore.invalidateProfilesAll();
       await Promise.all([_ensureProfilesLoaded(true), _ensureProfilesWithHiddenLoaded()]);
       const newList = currentlyHidden
-        ? (Array.isArray(_profileRecordsCacheAll) ? _profileRecordsCacheAll : []).filter(r => r.visibility === 'hidden')
-        : (Array.isArray(_profileRecordsCache) ? _profileRecordsCache : []);
+        ? (Array.isArray(NSXCore.getProfilesAll()) ? NSXCore.getProfilesAll() : []).filter(r => r.visibility === 'hidden')
+        : (Array.isArray(NSXCore.getProfiles()) ? NSXCore.getProfiles() : []);
       _applyNextSelection(newList, nextId);
       showToast(currentlyHidden ? t('toast.presetVisible') : t('toast.presetHidden'));
     } catch (err) {
@@ -6246,15 +6202,15 @@ function _renderProfilePreview(record) {
   document.getElementById('btn-profile-preview-restore')?.addEventListener('click', async (e) => {
     const profileId = e.target.closest('[data-profile-id]')?.getAttribute('data-profile-id') || recordId;
     const title = _profilePickerSelectedRecord?.profile?.title || t('profileEditor.unnamed');
-    const nextId = _pickNextId(Array.isArray(_deletedProfilesCache) ? _deletedProfilesCache : [], profileId);
+    const nextId = _pickNextId(Array.isArray(NSXCore.getDeletedProfiles()) ? NSXCore.getDeletedProfiles() : [], profileId);
     try {
       await restoreProfile(profileId);
-      _deletedProfilesCache = null;
-      _profileRecordsCache = null;
-      _profileRecordsCacheAll = null;
+      NSXCore.invalidateDeletedProfiles();
+      NSXCore.invalidateProfiles();
+      NSXCore.invalidateProfilesAll();
       showToast(t('toast.profileRestored').replace('{name}', title));
       await Promise.all([_ensureDeletedProfilesLoaded(), _ensureProfilesLoaded(true)]);
-      _applyNextSelection(Array.isArray(_deletedProfilesCache) ? _deletedProfilesCache : [], nextId);
+      _applyNextSelection(Array.isArray(NSXCore.getDeletedProfiles()) ? NSXCore.getDeletedProfiles() : [], nextId);
     } catch (err) {
       showToast(t('toast.error') + ': ' + err.message);
     }
@@ -6264,26 +6220,26 @@ function _renderProfilePreview(record) {
     if (_profilePickerMode === 'trash') {
       const title = _profilePickerSelectedRecord?.profile?.title || t('profileEditor.unnamed');
       if (!await showConfirm(t('confirm.purgeProfile').replace('{name}', title), t('action.purge'))) return;
-      const nextId = _pickNextId(Array.isArray(_deletedProfilesCache) ? _deletedProfilesCache : [], profileId);
+      const nextId = _pickNextId(Array.isArray(NSXCore.getDeletedProfiles()) ? NSXCore.getDeletedProfiles() : [], profileId);
       try {
         await purgeProfile(profileId);
-        _deletedProfilesCache = null;
+        NSXCore.invalidateDeletedProfiles();
         showToast(t('toast.profilePurged').replace('{name}', title));
         await _ensureDeletedProfilesLoaded();
-        _applyNextSelection(Array.isArray(_deletedProfilesCache) ? _deletedProfilesCache : [], nextId);
+        _applyNextSelection(Array.isArray(NSXCore.getDeletedProfiles()) ? NSXCore.getDeletedProfiles() : [], nextId);
       } catch (err) {
         showToast(t('toast.deleteFailed') + ': ' + err.message);
       }
     } else {
       if (!await showConfirm(t('confirm.deleteProfile'))) return;
-      const nextId = _pickNextId(Array.isArray(_profileRecordsCache) ? _profileRecordsCache : [], profileId);
+      const nextId = _pickNextId(Array.isArray(NSXCore.getProfiles()) ? NSXCore.getProfiles() : [], profileId);
       try {
         await deleteProfile(profileId);
         showToast(t('toast.profileDeleted'));
-        _profileRecordsCache = null;
-        _deletedProfilesCache = null;
+        NSXCore.invalidateProfiles();
+        NSXCore.invalidateDeletedProfiles();
         await _ensureProfilesLoaded();
-        _applyNextSelection(Array.isArray(_profileRecordsCache) ? _profileRecordsCache : [], nextId);
+        _applyNextSelection(Array.isArray(NSXCore.getProfiles()) ? NSXCore.getProfiles() : [], nextId);
       } catch (err) {
         showToast(t('toast.deleteFailed') + ': ' + err.message);
       }
@@ -6320,15 +6276,15 @@ function _renderProfilePickerList() {
   const isCopy   = _profilePickerMode === 'copy';
   let list;
   if (isTrash) {
-    list = Array.isArray(_deletedProfilesCache) ? _deletedProfilesCache : [];
+    list = Array.isArray(NSXCore.getDeletedProfiles()) ? NSXCore.getDeletedProfiles() : [];
   } else if (isHidden) {
-    list = (Array.isArray(_profileRecordsCacheAll) ? _profileRecordsCacheAll : []).filter(r => r.visibility === 'hidden');
+    list = (Array.isArray(NSXCore.getProfilesAll()) ? NSXCore.getProfilesAll() : []).filter(r => r.visibility === 'hidden');
   } else if (isCopy) {
-    list = Array.isArray(_profileRecordsCacheAll) ? _profileRecordsCacheAll : (Array.isArray(_profileRecordsCache) ? _profileRecordsCache : []);
+    list = Array.isArray(NSXCore.getProfilesAll()) ? NSXCore.getProfilesAll() : (Array.isArray(NSXCore.getProfiles()) ? NSXCore.getProfiles() : []);
   } else if (_profilePickerShowHidden) {
-    list = Array.isArray(_profileRecordsCacheAll) ? _profileRecordsCacheAll : (Array.isArray(_profileRecordsCache) ? _profileRecordsCache : []);
+    list = Array.isArray(NSXCore.getProfilesAll()) ? NSXCore.getProfilesAll() : (Array.isArray(NSXCore.getProfiles()) ? NSXCore.getProfiles() : []);
   } else {
-    list = Array.isArray(_profileRecordsCache) ? _profileRecordsCache : [];
+    list = Array.isArray(NSXCore.getProfiles()) ? NSXCore.getProfiles() : [];
   }
   const q = String(profilePickerSearchEl?.value || '').trim();
   const filtered = list.filter(r => _matchesProfileSearch(r, q));
@@ -6426,7 +6382,7 @@ function _renderProfileInfoBody(record, readOnly = false) {
       try {
         await deleteProfile(profileId);
         showToast(t('toast.profileDeleted'));
-        _profileRecordsCache = null;
+        NSXCore.invalidateProfiles();
         if (profileInfoModalEl) profileInfoModalEl.hidden = true;
         if (profilePickerModalEl && !profilePickerModalEl.hidden) {
           await _ensureProfilesLoaded();
@@ -7313,7 +7269,7 @@ function _peditorRenderFrames() {
 
   const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
   const allFrameNames = () => {
-    const all = Array.isArray(_profileRecordsCacheAll) ? _profileRecordsCacheAll : (_profileRecordsCache || []);
+    const all = Array.isArray(NSXCore.getProfilesAll()) ? NSXCore.getProfilesAll() : (NSXCore.getProfiles() || []);
     return uniq(all.flatMap(r => (r.profile?.steps ?? r.profile?.frames ?? []).map(s => s.name)));
   };
 
@@ -7625,7 +7581,7 @@ async function _peditorSave() {
     _peditorRecord = _normalizeProfileRecord(saved) || { id: saved?.id ?? _peditorRecord?.id ?? null, profile: payload };
     _peditorOriginalProfile = _peditorClone(_peditorRecord.profile) || _peditorClone(payload) || {};
     _peditorOriginalSnapshot = _peditorSnapshot();
-    _profileRecordsCache = null;
+    NSXCore.invalidateProfiles();
 
     // Bust cached gateway payload for every recipe that uses this profile title
     for (const recipe of workflowItems) {
@@ -7645,8 +7601,8 @@ async function _peditorSave() {
         try { await setProfileVisibility(originalId, 'hidden'); } catch { /* best-effort */ }
       }
       _peditorAttemptClose(true);
-      _profileRecordsCache = null;
-      _profileRecordsCacheAll = null;
+      NSXCore.invalidateProfiles();
+      NSXCore.invalidateProfilesAll();
       await _ensureProfilesLoaded(true);
       _setProfilePickerMode('my');
       const newRecord = _normalizeProfileRecord(saved);
@@ -7662,7 +7618,7 @@ async function _peditorSave() {
     } else {
       showToast(t('toast.profileSaved').replace('{name}', _peditorTitle));
       _setProfilePickerMode('my');
-      _profileRecordsCache = null;
+      NSXCore.invalidateProfiles();
       await _ensureProfilesLoaded();
       _renderProfilePickerList();
       _peditorAttemptClose(true);
@@ -8313,7 +8269,7 @@ async function openProfilePickerModal(context = 'editor') {
       if (cancelBtn) cancelBtn.textContent = t('action.cancel');
     }
     if (isRecipe) {
-      const records = Array.isArray(_profileRecordsCache) ? _profileRecordsCache : [];
+      const records = Array.isArray(NSXCore.getProfiles()) ? NSXCore.getProfiles() : [];
       let match = _editSelectedProfileId
         ? records.find(r => String(r.id) === String(_editSelectedProfileId))
         : null;
@@ -8603,10 +8559,10 @@ profilePickerListEl?.addEventListener('click', (e) => {
   if (!item || !profilePickerListEl.contains(item)) return;
   const id = item.dataset.profileId;
   const cache = _profilePickerMode === 'trash'
-    ? (_deletedProfilesCache || [])
+    ? (NSXCore.getDeletedProfiles() || [])
     : (_profilePickerMode === 'hidden' || _profilePickerMode === 'copy')
-      ? (_profileRecordsCacheAll || _profileRecordsCache || [])
-      : (_profileRecordsCache || []);
+      ? (NSXCore.getProfilesAll() || NSXCore.getProfiles() || [])
+      : (NSXCore.getProfiles() || []);
   const record = cache.find(r => String(r.id || '') === String(id || ''));
   if (!record) return;
   _profilePickerSelectedRecord = record;
@@ -8684,7 +8640,7 @@ async function _purgeSelectedProfile() {
   if (!confirm(t('confirm.purgeProfile').replace('{name}', title))) return;
   try {
     await purgeProfile(record.id);
-    _deletedProfilesCache = null;
+    NSXCore.invalidateDeletedProfiles();
     _profilePickerSelectedRecord = null;
     showToast(t('toast.profilePurged').replace('{name}', title));
     await _ensureDeletedProfilesLoaded();
@@ -8696,14 +8652,14 @@ async function _purgeSelectedProfile() {
 }
 
 document.getElementById('btn-profile-picker-empty-trash')?.addEventListener('click', async () => {
-  const records = _deletedProfilesCache || [];
+  const records = NSXCore.getDeletedProfiles() || [];
   if (!records.length) { showToast(t('toast.trashEmpty')); return; }
   if (!confirm(t('confirm.emptyTrash').replace('{count}', records.length))) return;
   let failed = 0;
   for (const record of records) {
     try { await purgeProfile(record.id); } catch { failed++; }
   }
-  _deletedProfilesCache = null;
+  NSXCore.invalidateDeletedProfiles();
   _profilePickerSelectedRecord = null;
   await _ensureDeletedProfilesLoaded();
   _renderProfilePickerList();
@@ -8765,7 +8721,7 @@ document.getElementById('profile-import-file-input')?.addEventListener('change',
       await setProfileVisibility(saved.id, 'visible').catch(() => {});
     }
 
-    _profileRecordsCache = null;
+    NSXCore.invalidateProfiles();
     await _ensureProfilesLoaded(true);
     _setProfilePickerMode('my');
 
@@ -8810,7 +8766,7 @@ async function _importFromVisualizer(shareCode) {
   if (saved?.id && saved?.visibility === 'deleted') {
     await setProfileVisibility(saved.id, 'visible').catch(() => {});
   }
-  _profileRecordsCache = null;
+  NSXCore.invalidateProfiles();
   await _ensureProfilesLoaded(true);
   _setProfilePickerMode('my');
   const newRecord = _normalizeProfileRecord(saved);
@@ -9914,7 +9870,7 @@ window.closeNumberPicker = closeNumberPicker;
 
 {
   const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
-  const allProfiles = () => Array.isArray(_profileRecordsCacheAll) ? _profileRecordsCacheAll : (_profileRecordsCache || []);
+  const allProfiles = () => Array.isArray(NSXCore.getProfilesAll()) ? NSXCore.getProfilesAll() : (NSXCore.getProfiles() || []);
   const profileEditorTextInputs = {
     'profile-editor-title':  () => uniq(allProfiles().map(r => r.profile?.title)),
     'profile-editor-author': () => uniq(allProfiles().map(r => r.profile?.author)),
