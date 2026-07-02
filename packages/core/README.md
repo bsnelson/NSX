@@ -134,6 +134,79 @@ explicitly. This is the shared shot/workflow "domain model": `formatMmSs`,
 
 ---
 
+## Bootstrapping a skin against NSXCore
+
+Load order in the skin's HTML (each core module registers on `NSXCore`, so a module
+must load after anything it uses):
+
+```
+config.js → translations.js → api.js → core.js → store.js → push.js
+  → domains/*.js  → (then your skin's own scripts)
+```
+
+**`api.js` opens all gateway WebSockets automatically on load** (scale, water,
+machine snapshot, devices, time-to-ready) — a skin does **not** call any connect
+function. Live data then flows in as `NSXCore` events (next section).
+
+Recommended startup sequence in the skin (mirrors what NSX does):
+
+1. **Subscribe to the events you need** with `NSXCore.on(...)` — do this early (at
+   module load) so nothing is missed; WS messages may already be arriving.
+2. `await NSXCore.migrateLegacyStore()` — one-time migration of legacy localStorage
+   settings into the store (safe no-op once migrated).
+3. `await NSXCore.loadStore()` — load the persisted settings object.
+4. `NSXCore.hydrateSteam()`, `hydrateHotwater()`, `hydrateFlush()`,
+   `hydrateSchedule()` — seed the machine-function domains from the loaded store.
+5. Initial REST load: `NSXApi.fetchMachineInfo()`, `NSXApi.fetchCurrentWorkflow()`,
+   `NSXCore.loadProfiles()`, `NSXApi.fetchShots(200)`, `NSXCore.loadRecipes()`,
+   `NSXApi.fetchSchedules()` → `NSXCore.setScheduleId(existing.id)`.
+
+Then render from the store/domain selectors and update on events. Writes go through
+commands (`NSXCore.setSteamTemp(...)`, `NSXCore.push(...)`, etc.), which persist
+and/or push to the gateway and emit `*Changed` events the UI re-renders from.
+
+> ⚠️ **Known DOM coupling in `api.js` (should be fixed before a 2nd skin).**
+> `api.js` is *supposed* to be DOM-free but currently does
+> `document.getElementById("scale-weight")` and writes the weight text/`offline`
+> class to that element directly (no null guard). A skin **without** an element
+> `id="scale-weight"` will hit a `TypeError` on the first scale-weight message.
+> The clean fix is to remove those DOM writes from core and have each skin render
+> the weight from the `scaleWeight` / `scaleConnected` events instead. Until then,
+> a consuming skin must provide a `#scale-weight` element.
+
+## Event payloads (`NSXCore.on(name, cb)`)
+
+Gateway-bridged events (payloads as emitted by `api.js`):
+
+| Event | Payload |
+|-------|---------|
+| `machineConnected` | `boolean` |
+| `scaleConnected`   | `boolean` |
+| `scaleWeight`      | `{ weight: number, weightFlow: number \| null }` |
+| `machineState`     | `{ state: string, substate?: string }` |
+| `waterLevel`       | `{ currentLevel: number, refillLevel: number }` |
+| `devices`          | `{ devices: any[], machineConnected: boolean, scaleConnected: boolean, connectionStatus: any }` |
+| `liveShot`         | the raw machine **snapshot** object — commonly used fields: `state.state`, `state.substate`, `timestamp`, `groupTemperature`, `steamTemperature`, `pressure`, `flow`, `targetPressure`, `targetFlow`, `profileFrame` |
+| `timeToReady`      | `{ remainingMs: number \| null }` |
+
+Domain-emitted events (fire after a command mutates that domain):
+
+| Event | Payload |
+|-------|---------|
+| `steamChanged`, `hotwaterChanged`, `flushChanged` | (none — re-read via the domain's selectors) |
+| `pitcherChanged` | (none) |
+| `scheduleChanged` | schedule-state snapshot |
+| `grindersLoaded` | `{ grinders }` |
+| `beansLoaded` | `{ beans }` |
+| `toast` | `string` (message to surface to the user) |
+
+## TypeScript
+
+Ambient declarations for the whole `window.NSXCore` / `NSXApi` / `NSXConfig` /
+`NSXI18n` surface live in **[`nsxcore.d.ts`](nsxcore.d.ts)** — include it in a
+TS skin (e.g. Vue+Vite) for autocomplete and compile-time checks against the core
+API. Keep it in sync when you add/rename a core method.
+
 ## What deliberately stays in the skin (`packages/nsx/src/modules/app.js`)
 
 Not everything belongs in core. Left in app.js on purpose because it is DOM-fused
