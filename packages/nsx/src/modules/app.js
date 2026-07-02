@@ -1597,6 +1597,14 @@ async function endLiveShotSession() {
     setTimeout(_hideLiveWidget, 800);
   };
 
+  // Cleaning-cycle shots are never saved to shot history — there's nothing to
+  // poll for, and waiting out the full 30s timeout leaves the live widget
+  // visibly stuck. Hide it right away instead.
+  if (_forcedLiveWorkflow) {
+    setTimeout(_hideLiveWidget, 800);
+    return;
+  }
+
   const POLL_INTERVAL = 2000;
   const POLL_TIMEOUT  = 30000;
   const pollStart = Date.now();
@@ -2089,9 +2097,14 @@ NSXCore.on("machineState", (d) => {
 
   if (state === 'espresso' && !wasEspressoLike) {
     // A shot just started — close any open modal (as if the user pressed Close)
-    // so the live shot on the Rezepte tab isn't hidden behind it.
-    _closeOpenModals();
-    window.NSXRouter?.setTab(1);
+    // so the live shot on the Rezepte tab isn't hidden behind it. Skip this for
+    // the cleaning cycle: it drives the machine into 'espresso' too, but runs
+    // its own step-3 wizard modal + graph on the Home tab and must not be
+    // closed or navigated away from.
+    if (!_forcedLiveWorkflow) {
+      _closeOpenModals();
+      window.NSXRouter?.setTab(1);
+    }
     tareScale?.().catch(() => {});
     startLiveShotSession();
     const _reserve = document.getElementById('workflow-graph-reserve');
