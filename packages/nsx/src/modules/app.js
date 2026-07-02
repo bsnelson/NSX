@@ -173,7 +173,6 @@ let shots = [];
 let historyShots = [];
 let workflowItems = [];
 let workflowSearchQuery = '';
-let currentMachineState = 'idle';
 let _workflowPushNonce = 0;
 let displayWs = null;
 let displayReconnectDelay = 1000;
@@ -205,9 +204,7 @@ let _skipStepLastSentAt = 0;
 const SKIP_STEP_MIN_INTERVAL_MS = 800;
 let _skipStepRecoveryTimer = null;
 
-function _isEspressoLikeState(state) {
-  return state === 'espresso' || state === 'skipStep';
-}
+const _isEspressoLikeState = (state) => NSXCore.isEspressoLikeState(state);
 
 function _clearSkipStepRecoveryTimer() {
   if (_skipStepRecoveryTimer !== null) {
@@ -220,7 +217,7 @@ function _scheduleSkipStepRecovery() {
   _clearSkipStepRecoveryTimer();
   _skipStepRecoveryTimer = setTimeout(() => {
     _skipStepRecoveryTimer = null;
-    if (currentMachineState === 'skipStep' && liveShot) {
+    if (NSXCore.getMachineState() === 'skipStep' && liveShot) {
       setMachineState?.('espresso').catch(() => {});
     }
   }, 700);
@@ -277,7 +274,7 @@ const ALLOWED_OPERATIONS = {
   needsWater: ['setState'],
 };
 
-function canExecuteOperation(operation, state = currentMachineState) {
+function canExecuteOperation(operation, state = NSXCore.getMachineState()) {
   return ALLOWED_OPERATIONS[state]?.includes(operation) ?? false;
 }
 
@@ -932,7 +929,7 @@ async function pushSelectedWorkflowToMachine(workflow) {
   if (!workflow) return;
 
   if (!canExecuteOperation('setWorkflow')) {
-    showToast(t('toast.recipeStateError').replace('{state}', currentMachineState));
+    showToast(t('toast.recipeStateError').replace('{state}', NSXCore.getMachineState()));
     setWorkflowSyncState?.('error');
     return;
   }
@@ -1287,7 +1284,7 @@ function _scheduleEspressoFullscreenReturn() {
   _clearEspressoFullscreenCloseTimer();
   _espressoFullscreenCloseTimer = setTimeout(() => {
     _espressoFullscreenCloseTimer = null;
-    if (currentMachineState === 'espresso') return;
+    if (NSXCore.getMachineState() === 'espresso') return;
     closeEspressoFullscreen();
     window.NSXRouter?.setTab(1);
   }, 2000);
@@ -1958,7 +1955,7 @@ function _maybeAutoTareNegative(weight) {
   if (storeSettings.nsx_tare_on_negative === false) return;
   if (!scaleConnected || !Number.isFinite(weight) || weight >= -1.0) return;
   // Don't interfere while the machine is actively dispensing.
-  if (['espresso', 'steam', 'hotWater', 'flush'].includes(currentMachineState)) return;
+  if (['espresso', 'steam', 'hotWater', 'flush'].includes(NSXCore.getMachineState())) return;
   const now = Date.now();
   if (now - _lastAutoTareAt < 1500) return;
   _lastAutoTareAt = now;
@@ -1994,7 +1991,7 @@ NSXCore.on("scaleWeight", (d) => {
     }
   }
   updateEspressoFullscreen();
-  if (currentMachineState === 'hotWater' && !_hotWaterDone) {
+  if (NSXCore.getMachineState() === 'hotWater' && !_hotWaterDone) {
     const dispensed = Math.max(0, newWeight - _hotWaterStartWeight);
     const dispensedEl = document.getElementById('hotwater-dispensed');
     const progressEl  = document.getElementById('hotwater-ring-progress');
@@ -2050,7 +2047,7 @@ NSXCore.on("waterLevel", (d) => {
 NSXCore.on("timeToReady", (d) => {
   if (!readyInChipEl) return;
   const { remainingMs } = d || {};
-  const isWarmingUp = currentMachineState === 'heating' || currentMachineState === 'preheating';
+  const isWarmingUp = NSXCore.getMachineState() === 'heating' || NSXCore.getMachineState() === 'preheating';
   if (isWarmingUp && typeof remainingMs === 'number' && remainingMs > 0) {
     readyInChipEl.textContent = t('machine.readyIn').replace('{time}', formatMmSs(remainingMs));
     readyInChipEl.hidden = false;
@@ -2073,10 +2070,10 @@ const MACHINE_STATE_LABELS = {
 NSXCore.on("machineState", (d) => {
   const state = d?.state || 'idle';
   const substate = d?.substate;
-  const prevState = currentMachineState;
+  const prevState = NSXCore.getMachineState(); // read before overwriting — see machine.js header
   const wasEspressoLike = _isEspressoLikeState(prevState);
   const isEspressoLike = _isEspressoLikeState(state);
-  currentMachineState = state;
+  NSXCore.setMachineState(state);
   setMachineStateText(state);
   _updatePhoneMachineCard();
 
@@ -3129,13 +3126,13 @@ document.getElementById("btn-sleep").addEventListener("click", async () => {
   signalUserPresence();
   window.NSXScreensaver?.show(false, true);
   window.NSXScreensaver?.clearSuppressions();
-  if (currentMachineState === 'sleeping') {
+  if (NSXCore.getMachineState() === 'sleeping') {
     setMachineStateText("sleeping");
     return;
   }
   try {
     const alertStates = ['needsWater', 'error', 'descaling', 'cleanMeSoon', 'descaleNeeded'];
-    if (alertStates.includes(currentMachineState)) {
+    if (alertStates.includes(NSXCore.getMachineState())) {
       await setMachineState("idle");
     }
     await setMachineState("sleeping");
@@ -3881,7 +3878,7 @@ async function hydrateUiSettingsFromStore() {
     window.NSXScreensaver?.setUnlockCallback(() => {
       // Land on the configured start page (Home or Recipes) when unlocking.
       window.NSXRouter?.setTab(storeSettings.nsx_start_tab === 'recipe' ? 1 : 0, false);
-      if (storeSettings.nsx_wake_on_unlock !== false && currentMachineState === 'sleeping') {
+      if (storeSettings.nsx_wake_on_unlock !== false && NSXCore.getMachineState() === 'sleeping') {
         setMachineState('idle')
           .then(() => _schedulePushCurrentSkinState(true))
           .catch(() => {});
@@ -11109,8 +11106,8 @@ function _updatePhoneMachineCard() {
 
   const statusWrap = document.getElementById('phone-machine-status');
   const statusText = document.getElementById('phone-machine-status-text');
-  if (statusWrap) statusWrap.dataset.state = currentMachineState;
-  if (statusText) statusText.textContent = _PHONE_STATE_LABELS[currentMachineState] || 'Ready';
+  if (statusWrap) statusWrap.dataset.state = NSXCore.getMachineState();
+  if (statusText) statusText.textContent = _PHONE_STATE_LABELS[NSXCore.getMachineState()] || 'Ready';
 }
 
 function _selectPhoneTab(tab) {
@@ -11210,7 +11207,7 @@ document.getElementById('btn-needswater-overlay-stop')?.addEventListener('click'
 });
 
 document.getElementById('btn-espresso-fs-exit')?.addEventListener('click', () => {
-  if (currentMachineState === 'espresso') {
+  if (NSXCore.getMachineState() === 'espresso') {
     setMachineState?.('idle').catch(() => {});
     return;
   }
@@ -11220,7 +11217,7 @@ document.getElementById('btn-espresso-fs-exit')?.addEventListener('click', () =>
 });
 
 document.getElementById('btn-espresso-fs-skip-step')?.addEventListener('click', () => {
-  if (currentMachineState !== 'espresso') {
+  if (NSXCore.getMachineState() !== 'espresso') {
     showToast(t('toast.skipStepOnly'));
     return;
   }
@@ -11257,7 +11254,7 @@ document.getElementById('btn-espresso-fs-skip-step')?.addEventListener('click', 
 
 document.querySelector('.workflow-graph-area')?.addEventListener('click', (e) => {
   if (!e.target.closest('#btn-wf-skip-step')) return;
-  if (currentMachineState !== 'espresso') {
+  if (NSXCore.getMachineState() !== 'espresso') {
     showToast(t('toast.skipPhaseOnly'));
     return;
   }
