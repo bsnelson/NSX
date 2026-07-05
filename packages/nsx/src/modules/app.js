@@ -10571,7 +10571,7 @@ const muehlenModalEl = document.getElementById('muehlen-modal');
 const muehlenCreateModalEl = document.getElementById('muehlen-create-modal');
 let _editingGrinder = null;
 
-function renderGrinderTiles(grinders, gramsMap = new Map()) {
+function renderGrinderTiles(grinders) {
   const panel = document.getElementById('muehlen-panel-list');
   if (!panel) return;
 
@@ -10595,11 +10595,6 @@ function renderGrinderTiles(grinders, gramsMap = new Map()) {
     const burrTypeLabel    = g.burrType === 'conical' ? t('grinderEditor.conical') : g.burrType === 'flat' ? t('grinderEditor.flat') : '';
     const settingTypeLabel = g.settingType === 'preset' ? t('grinderEditor.positions') : t('grinderEditor.stepless');
 
-    const totalGrams = gramsMap.get(normalizeWorkflowKeyPart(g.model)) || 0;
-    const gramsStr   = totalGrams >= 1000
-      ? `${(totalGrams / 1000).toFixed(1).replace('.', ',')} kg`
-      : totalGrams > 0 ? `${Math.round(totalGrams)} g` : '';
-
     tile.innerHTML = `
       <span class="bean-tile-name">${g.model || '—'}</span>
       <hr class="bean-tile-divider">
@@ -10610,10 +10605,6 @@ function renderGrinderTiles(grinders, gramsMap = new Map()) {
           ${row(t('grinderEditor.type'), burrTypeLabel)}
           ${row(t('grinderEditor.setting'), settingTypeLabel)}
         </div>
-        ${gramsStr ? `<div class="grinder-tile-grams">
-          <span class="bean-detail-label">${t('grinderEditor.gramsUsed')}</span>
-          <span class="bean-detail-value">${gramsStr}</span>
-        </div>` : ''}
       </div>
     `;
 
@@ -10626,30 +10617,10 @@ async function loadAndRenderGrinders() {
   const panel = document.getElementById('muehlen-panel-list');
   if (panel) panel.innerHTML = `<div class="bohnen-empty-state">${t('status.loading')}</div>`;
   try {
-    const [grindersRes, peek] = await Promise.all([fetchGrinders(), fetchShots(1)]);
+    const grindersRes = await fetchGrinders();
     const gList = Array.isArray(grindersRes) ? grindersRes : (grindersRes?.items ?? []);
     NSXCore.setGrindersCache(gList);
-
-    // Fetch all shots to sum grams per grinder model
-    const total = peek?.total || 0;
-    let allShots = peek?.items || [];
-    if (total > allShots.length) {
-      try {
-        const all = await fetchShots(total);
-        allShots = all?.items || allShots;
-      } catch { /* use peek items as fallback */ }
-    }
-
-    const gramsMap = new Map();
-    for (const shot of allShots) {
-      const ctx   = shot?.workflow?.context || {};
-      const model = normalizeWorkflowKeyPart(ctx.grinderModel);
-      if (model === '—') continue;
-      const dose  = Number(ctx.targetDoseWeight || 0);
-      if (dose > 0) gramsMap.set(model, (gramsMap.get(model) || 0) + dose);
-    }
-
-    renderGrinderTiles(gList, gramsMap);
+    renderGrinderTiles(gList);
   } catch {
     if (panel) panel.innerHTML = '<div class="bohnen-empty-state">Fehler beim Laden</div>';
   }
