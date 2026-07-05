@@ -3973,6 +3973,7 @@ async function _loadMoreHistory() {
 }
 
 const _recipeRatingCache = new Map(); // key: getWorkflowKey → { max:number|null, count:number }
+let _ratingQueueRunning = false; // guards the sequential rating-fetch queue
 
 const _computeMaxRating = (shotList) => NSXCore.computeMaxRating(shotList);
 
@@ -4001,27 +4002,45 @@ function _attachRecipeRating(w) {
 }
 
 function _loadRecipeRatings(recipes) {
+  // Apply already-cached ratings right away (free), and collect the rest.
+  const pending = [];
   for (const r of recipes || []) {
     const key = getWorkflowKey(r);
     if (_recipeRatingCache.has(key)) {
       const c = _recipeRatingCache.get(key);
       updateRecipeRating?.(key, c.max, c.count);
-      continue;
+    } else {
+      pending.push(r);
     }
-    const params = {};
-    if (r.coffeeName    && r.coffeeName    !== '—') params.coffeeName    = r.coffeeName;
-    if (r.coffeeRoaster && r.coffeeRoaster !== '—') params.coffeeRoaster = r.coffeeRoaster;
-    if (r.grinderModel  && r.grinderModel  !== '—') params.grinderModel  = r.grinderModel;
-    if (r.profileTitle  && r.profileTitle  !== '—') params.profileTitle  = r.profileTitle;
-    _fetchAllRecipeShots(params)
-      .then(items => {
+  }
+  // Process the uncached recipes strictly one at a time, deferred off the
+  // tab-open paint. Each _fetchAllRecipeShots is a paginated /shots sweep;
+  // running them concurrently used to freeze the UI for a couple of seconds
+  // the first time History opened. Sequential + deferred keeps it smooth —
+  // ratings just fill in one by one.
+  if (!pending.length || _ratingQueueRunning) return;
+  _ratingQueueRunning = true;
+  const runQueue = async () => {
+    for (const r of pending) {
+      const key = getWorkflowKey(r);
+      if (_recipeRatingCache.has(key)) continue; // filled meanwhile
+      try {
+        const params = {};
+        if (r.coffeeName    && r.coffeeName    !== '—') params.coffeeName    = r.coffeeName;
+        if (r.coffeeRoaster && r.coffeeRoaster !== '—') params.coffeeRoaster = r.coffeeRoaster;
+        if (r.grinderModel  && r.grinderModel  !== '—') params.grinderModel  = r.grinderModel;
+        if (r.profileTitle  && r.profileTitle  !== '—') params.profileTitle  = r.profileTitle;
+        const items = await _fetchAllRecipeShots(params);
         const matched = items.filter(s => getWorkflowKey(mapShotToWorkflow(s)) === key);
         const { max, count } = _computeMaxRating(matched);
         _recipeRatingCache.set(key, { max, count });
         updateRecipeRating?.(key, max, count);
-      })
-      .catch(() => {});
-  }
+      } catch { /* ignore per-recipe failures */ }
+    }
+    _ratingQueueRunning = false;
+  };
+  const defer = window.requestIdleCallback || ((fn) => setTimeout(fn, 0));
+  defer(() => runQueue());
 }
 
 // Recipe cards show the instant rating approximation from already-loaded shots
