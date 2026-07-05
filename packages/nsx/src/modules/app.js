@@ -1279,8 +1279,9 @@ async function endLiveShotSession() {
 
 function startSteamSession() {
   steamSession = {
-    startTime: null,   // machine-clock anchor (ms), set from the first steam snapshot
+    startTime: null,   // machine-clock anchor (ms), set on the first 'pouring' snapshot
     elapsedSec: 0,     // machine-derived elapsed seconds (drives the countdown)
+    steaming: false,   // true only while substate is 'pouring' (actively steaming)
     elapsed: [],
     pressure: [],
     targetPressure: [],
@@ -1840,25 +1841,35 @@ NSXCore.on("liveShot", (snap) => {
   _updatePhoneMachineCard();
 
   if (steamSession && snap?.state?.state === 'steam') {
-    // Couple the steam timer to machine-snapshot time — the same basis the shot
-    // graph/timer use. The snapshot stream is shared across machine states, so
-    // snap.timestamp is authoritative for steam too; anchor on the first steam
-    // snapshot and derive elapsed from it (never the browser's Date.now()).
+    // The steam timer counts only the active pour, on the machine snapshot clock
+    // (snap.timestamp, never the browser wall clock — same basis as the shot).
+    // Start when the substate becomes 'pouring' (not at the state transition,
+    // which includes heat-up) and freeze when it returns to 'idle'.
     const snapTime = new Date(snap.timestamp).getTime();
-    if (steamSession.startTime === null) steamSession.startTime = snapTime;
-    const t = (snapTime - steamSession.startTime) / 1000;
-    steamSession.elapsedSec = t;
-    steamSession.elapsed.push(t);
-    steamSession.pressure.push(snap.pressure ?? 0);
-    steamSession.targetPressure.push(null);
-    steamSession.flow.push(snap.flow ?? 0);
-    steamSession.targetFlow.push(null);
-    steamSession.scaleRate.push(null);
-    steamSession.temperature.push(snap.steamTemperature ?? null);
-    steamSession.targetTemperature.push(null);
+    // steaming = actively pouring steam. elapsedSec only advances here, so the
+    // countdown freezes at its final value the moment the pour ends (substate
+    // leaves 'pouring', e.g. back to 'idle').
+    steamSession.steaming = snap.state?.substate === 'pouring';
+    if (steamSession.steaming) {
+      if (steamSession.startTime === null) steamSession.startTime = snapTime;
+      steamSession.elapsedSec = (snapTime - steamSession.startTime) / 1000;
+    }
 
-    const graphEl = document.getElementById('steam-overlay-graph');
-    if (graphEl?._liveMode) updateSteamChart?.(graphEl, steamSession);
+    // Record graph samples only while actively steaming.
+    if (steamSession.steaming && steamSession.startTime !== null) {
+      const t = (snapTime - steamSession.startTime) / 1000;
+      steamSession.elapsed.push(t);
+      steamSession.pressure.push(snap.pressure ?? 0);
+      steamSession.targetPressure.push(null);
+      steamSession.flow.push(snap.flow ?? 0);
+      steamSession.targetFlow.push(null);
+      steamSession.scaleRate.push(null);
+      steamSession.temperature.push(snap.steamTemperature ?? null);
+      steamSession.targetTemperature.push(null);
+
+      const graphEl = document.getElementById('steam-overlay-graph');
+      if (graphEl?._liveMode) updateSteamChart?.(graphEl, steamSession);
+    }
 
     const snapPressure = snap.pressure ?? null;
     const snapFlow     = snap.flow     ?? null;
