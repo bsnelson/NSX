@@ -12,6 +12,9 @@ ios/
 dist/
 build/
 
+# Local test/release skin archives
+*.zip
+
 # Dev: shared core synced into the NSX skin's served root.
 # Source of truth is packages/core/src — run `npm run sync-core` to (re)create.
 packages/nsx/src/core/
