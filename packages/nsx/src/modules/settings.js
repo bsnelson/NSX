@@ -154,7 +154,7 @@
     { id: 'connections',  label: 'Connections'  },
     { id: 'machine',      label: 'Machine'      },
     { id: 'interface',    label: 'Interface'    },
-    // { id: 'plugins',      label: 'Plugins'      },
+    { id: 'plugins',      label: 'Plugins'      },
     { id: 'maintenance',  label: 'Maintenance'  },
     { id: 'misc',         label: 'Advanced'     },
   ];
@@ -866,26 +866,33 @@
         const s2 = section('Account');
         const pwdInp = h('input', 'stg-text-input');
         pwdInp.type = 'password';
-        pwdInp.value = settings.password ?? '';
+        pwdInp.value = settings.Password ?? '';
         pwdInp.placeholder = 'Password…';
-        pwdInp.addEventListener('change', () => savePluginSetting(id, 'password', pwdInp.value));
+        pwdInp.addEventListener('change', () => savePluginSetting(id, 'Password', pwdInp.value));
         s2.rows.append(
-          row('Username', null, textInput(settings.username ?? '', 'Username…',
-            v => savePluginSetting(id, 'username', v))),
+          row('Username', null, textInput(settings.Username ?? '', 'Username…',
+            v => savePluginSetting(id, 'Username', v))),
           row('Password', null, pwdInp),
         );
         target.appendChild(s2.wrap);
 
         const s3 = section('Upload');
         s3.rows.append(
-          row('Auto Upload', null, toggle(settings.autoUpload ?? false,
-            v => savePluginSetting(id, 'autoUpload', v))),
-          row('Min. Shot Duration (s)', null, numWheelPicker(settings.minShotDuration ?? 10, 0, 120, 5,
-            v => savePluginSetting(id, 'minShotDuration', v))),
-          row('Extended Metadata', null, toggle(settings.extendedMetadata ?? false,
-            v => savePluginSetting(id, 'extendedMetadata', v))),
+          row('Auto Upload', null, toggle(settings.AutoUpload ?? true,
+            v => savePluginSetting(id, 'AutoUpload', v))),
+          row('Min. Shot Duration (s)', null, numWheelPicker(settings.LengthThreshold ?? 5, 0, 120, 5,
+            v => savePluginSetting(id, 'LengthThreshold', v))),
         );
         target.appendChild(s3.wrap);
+
+        const s4 = section('Back Sync');
+        s4.rows.append(
+          row('Enable Back Sync', null, toggle(settings.BackSync ?? false,
+            v => savePluginSetting(id, 'BackSync', v))),
+          row('Interval (s)', null, numWheelPicker(settings.BackSyncIntervalSeconds ?? 300, 60, 3600, 60,
+            v => savePluginSetting(id, 'BackSyncIntervalSeconds', v))),
+        );
+        target.appendChild(s4.wrap);
       }
     } catch (e) { showError(target, e.message); }
   }
