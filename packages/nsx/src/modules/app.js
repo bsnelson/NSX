@@ -78,6 +78,8 @@ const {
   updateLiveShotChart,
   initSteamChart,
   updateSteamChart,
+  initCleaningChart,
+  updateCleaningChart,
   setMachineConnected,
   setMachineInfo,
   setMachineStateText,
@@ -2468,7 +2470,53 @@ homeWorkflowWidget?.addEventListener('keydown', e => {
   const cleaningProfileListEl = document.getElementById('cleaning-profile-list');
   const cleaningStep3IdleEl   = document.getElementById('cleaning-step3-idle');
   const cleaningGraphEl       = document.getElementById('cleaning-live-graph');
+  const cleaningProgressEl    = document.getElementById('cleaning-progress');
+  const cleaningProgressTextEl = document.getElementById('cleaning-progress-text');
   const cleaningStep3TitleEl  = document.getElementById('cleaning-step3-title');
+
+  // "Schritt x von y": y = number of frames in the cleaning profile,
+  // x = 1-based index of the currently running frame (liveShot.lastProfileFrame).
+  function _updateCleaningProgress() {
+    if (!cleaningProgressEl) return;
+    const total = _getLiveProfileFrames().length;
+    const frame = liveShot?.lastProfileFrame;
+    if (!total || !Number.isFinite(frame)) {
+      cleaningProgressEl.hidden = true;
+      return;
+    }
+    const current = Math.min(frame + 1, total);
+    if (cleaningProgressTextEl) {
+      cleaningProgressTextEl.textContent = t('cleaning.stepProgress')
+        .replace('{x}', current)
+        .replace('{y}', total);
+    }
+    cleaningProgressEl.hidden = false;
+  }
+
+  // Skip the currently running cleaning frame — same gateway command and
+  // guard rails as the espresso/workflow skip buttons.
+  document.getElementById('btn-cleaning-skip-step')?.addEventListener('click', () => {
+    if (NSXCore.getMachineState() !== 'espresso') {
+      showToast(t('toast.skipStepOnly'));
+      return;
+    }
+    if (_skipStepInFlight) return;
+    const now = Date.now();
+    if (now - _skipStepLastSentAt < SKIP_STEP_MIN_INTERVAL_MS) return;
+    const currentFrame = Number.isFinite(liveShot?.lastProfileFrame) ? liveShot.lastProfileFrame : null;
+    if (currentFrame !== null && currentFrame === _skipStepGuardFrame) {
+      showToast(t('toast.stepSkipped'));
+      return;
+    }
+    _skipStepInFlight = true;
+    setMachineState?.('skipStep')
+      .then(() => {
+        _skipStepLastSentAt = Date.now();
+        if (currentFrame !== null) _skipStepGuardFrame = currentFrame;
+      })
+      .catch(() => showToast(t('toast.skipStepFailed')))
+      .finally(() => { _skipStepInFlight = false; });
+  });
 
   let _cleaningPreShotId       = null;
   let _cleaningPreShotIds      = new Set();
@@ -2589,6 +2637,7 @@ homeWorkflowWidget?.addEventListener('keydown', e => {
       cleaningGraphEl._liveMode = false;
     }
     if (cleaningGraphEl)   cleaningGraphEl.hidden = true;
+    if (cleaningProgressEl) cleaningProgressEl.hidden = true;
     if (cleaningStep3IdleEl) cleaningStep3IdleEl.hidden = false;
     if (cleaningStep3TitleEl) cleaningStep3TitleEl.textContent = t('cleaning.title');
   }
@@ -2628,8 +2677,10 @@ homeWorkflowWidget?.addEventListener('keydown', e => {
   // Schritt 1 → 2: Profile laden und filtern
   document.getElementById('btn-cleaning-ready')?.addEventListener('click', async () => {
     try {
-      // _ensureProfilesLoaded gibt normalisierte Records zurück: { id, profile: { title, ... }, ... }
-      const allRecords = await _ensureProfilesLoaded();
+      // Visible+hidden: a cleaning profile can legitimately be hidden — the visible-only
+      // set would miss it and offer no cleaning profile. Records are normalized:
+      // { id, profile: { title, ... }, ... }
+      const allRecords = await _ensureProfilesWithHiddenLoaded();
       const cleanedRecords = allRecords.filter(r =>
         /clean|reinig|backflush|flush/i.test(r.profile?.title || '')
       );
@@ -2740,10 +2791,14 @@ homeWorkflowWidget?.addEventListener('keydown', e => {
         if (cleaningStep3TitleEl) cleaningStep3TitleEl.textContent = t('toast.cleaningRunning');
 
         requestAnimationFrame(() => {
-          initLiveShotChart?.(cleaningGraphEl);
+          initCleaningChart?.(cleaningGraphEl);
+          _updateCleaningProgress();
           // Snapshot-Updates für den Reinigungsgraph
           _cleaningSnapshotHandler = () => {
-            if (liveShot) updateLiveShotChart?.(cleaningGraphEl, liveShot);
+            if (liveShot) {
+              updateCleaningChart?.(cleaningGraphEl, liveShot);
+              _updateCleaningProgress();
+            }
           };
           window.addEventListener('gateway:snapshot', _cleaningSnapshotHandler);
         });

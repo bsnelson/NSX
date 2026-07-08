@@ -133,10 +133,14 @@
     };
 
     if (expectedProfile) {
-      try { matchFrom(await NSXCore.loadProfiles()); } catch { /* fall through */ }
+      // Resolve against the visible+hidden set: a recipe can legitimately reference a
+      // profile that was later hidden, and for resolving a concrete id/title "hidden"
+      // is irrelevant (only deleted profiles must be excluded). The visible-only cache
+      // would return null for a hidden profile and refuse the push.
+      try { matchFrom(await NSXCore.loadProfilesWithHidden()); } catch { /* fall through */ }
       // If the cache was empty/stale (e.g. right after wake), force a fresh load and retry once.
       if (!profileObj) {
-        try { matchFrom(await NSXCore.loadProfiles(true)); } catch { /* fall through */ }
+        try { matchFrom(await NSXCore.loadProfilesWithHidden(true)); } catch { /* fall through */ }
       }
       // Refuse to push a frameless profile — it would start the shot then immediately
       // stop it (and the gateway records nothing). Signal failure to the caller instead.

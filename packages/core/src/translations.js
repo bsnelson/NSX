@@ -541,6 +541,8 @@ const TRANSLATIONS = {
     'cleaning.running.title': 'Reinigung',
     'cleaning.running.text':  'Extraktionsbutton am Group Head Controller drücken.',
     'cleaning.running.wait':  'Warte auf Maschine…',
+    'cleaning.stepProgress':  'Schritt {x} von {y}',
+    'cleaning.skipStep':      'Step ↷',
     'cleaning.done.title':    'Reinigung fertig',
     'cleaning.done.text':     'Reinigung abgeschlossen. Auf Fertig drücken wenn du bereit bist.',
 
@@ -1207,6 +1209,8 @@ const TRANSLATIONS = {
     'cleaning.running.title': 'Cleaning',
     'cleaning.running.text':  'Press the extraction button on the Group Head Controller.',
     'cleaning.running.wait':  'Waiting for machine…',
+    'cleaning.stepProgress':  'Step {x} of {y}',
+    'cleaning.skipStep':      'Step ↷',
     'cleaning.done.title':    'Cleaning done',
     'cleaning.done.text':     'Cleaning complete. Press Done when you are ready.',
 

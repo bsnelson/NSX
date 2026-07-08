@@ -8489,6 +8489,41 @@ body.hide-recipe-card-rating #workflow-list .recipe-rating {
   width: 100%;
 }
 
+.cleaning-progress:not([hidden]) {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 10px 16px 4px;
+}
+
+.cleaning-progress-text {
+  font-size: var(--fs-heading);
+  font-weight: 700;
+  color: var(--c-label);
+}
+
+.cleaning-skip-btn {
+  appearance: none;
+  border: 0.5px solid var(--c-separator);
+  background: rgba(10, 132, 255, 0.16);
+  color: var(--c-label);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  font-family: inherit;
+  transition: transform 120ms ease, background-color 120ms ease;
+}
+
+.cleaning-skip-btn:active {
+  transform: scale(0.95);
+  background: rgba(10, 132, 255, 0.28);
+}
+
 
 /* ── History Page ────────────────────────────────────── */
 

@@ -923,7 +923,7 @@ function renderShotPhases(graphEl, shot, normalized, chart) {
   graphEl.appendChild(layer);
 }
 
-function createChartOpts(width, height, visibility, tempRange = { min: 80, max: 100 }) {
+function createChartOpts(width, height, visibility, tempRange = { min: 80, max: 100 }, { showTempAxis = true } = {}) {
   const spline = uPlot.paths.spline?.();
   const formatSecondsTick = (value) => {
     if (!Number.isFinite(value)) return '';
@@ -963,7 +963,7 @@ function createChartOpts(width, height, visibility, tempRange = { min: 80, max: 
         font: '11px system-ui',
         gap: 6,
         scale: 'temp',
-        show: true,
+        show: showTempAxis,
       },
     ],
     scales: {
@@ -1259,6 +1259,58 @@ function updateSteamChart(graphEl, steamSession) {
     ]);
   } catch (err) {
     console.warn('updateSteamChart error:', err);
+  }
+}
+
+// Cleaning graph: deliberately minimal — only pressure + flow on the 0–12 bar
+// scale, no target lines, no phase markers/names, no temp/scale-rate series
+// (and no right-hand temp axis). Kept separate from initLiveShotChart so it
+// never mutates the shared LIVE_SERIES_VISIBILITY state.
+function initCleaningChart(graphEl) {
+  if (graphEl._chart) {
+    graphEl._chart.destroy();
+    graphEl._chart = null;
+  }
+  graphEl.innerHTML = '';
+
+  const width = graphEl.offsetWidth || 400;
+  const height = graphEl.offsetHeight || 300;
+
+  const visibility = {
+    pressure: true,
+    flow: true,
+    scaleRate: false,
+    temperature: false,
+    steps: false,
+    goals: false,
+  };
+  const opts = createChartOpts(width, height, visibility, { min: 80, max: 100 }, { showTempAxis: false });
+
+  try {
+    const chart = new uPlot(opts, [[], [], [], [], [], [], [], []], graphEl);
+    graphEl._chart = chart;
+    graphEl._seriesVisibility = visibility;
+    graphEl._liveMode = true;
+  } catch (err) {
+    console.error('initCleaningChart: uPlot error:', err);
+  }
+}
+
+function updateCleaningChart(graphEl, liveShot) {
+  if (!graphEl?._chart || !graphEl._liveMode) return;
+  try {
+    graphEl._chart.setData([
+      liveShot.elapsed,
+      liveShot.pressure,
+      liveShot.targetPressure,
+      liveShot.flow,
+      liveShot.targetFlow,
+      liveShot.scaleRate,
+      liveShot.temperature,
+      liveShot.targetTemperature,
+    ]);
+  } catch (err) {
+    console.warn('updateCleaningChart error:', err);
   }
 }
 
@@ -1798,6 +1850,8 @@ window.NSXUI = {
   updateLiveShotChart,
   initSteamChart,
   updateSteamChart,
+  initCleaningChart,
+  updateCleaningChart,
   renderLiveShotStats,
   setMachineConnected,
   setMachineInfo,
