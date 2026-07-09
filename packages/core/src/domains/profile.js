@@ -37,6 +37,13 @@
   let _cacheAll = null;
   let _deletedCache = null;
 
+  // Last raw payload returned by the ETag-backed fetchers. On a 304 the fetcher
+  // hands back the same reference, so we can keep the normalized _cache stable
+  // (same array reference) instead of rebuilding it — lets the skin detect
+  // "unchanged" via `getProfiles() === before` and skip re-rendering.
+  let _rawProfiles = null;
+  let _rawProfilesAll = null;
+
   function getProfiles()        { return _cache; }
   function getProfilesAll()     { return _cacheAll; }
   function getDeletedProfiles() { return _deletedCache; }
@@ -63,6 +70,9 @@
     if (typeof fetchProfiles !== "function") return [];
     if (_cache?.length && !force) return _cache;
     const data = await fetchProfiles();
+    // 304 → same payload reference → nothing changed, keep the existing cache.
+    if (data && data === _rawProfiles && _cache?.length) return _cache;
+    _rawProfiles = data;
     const list = Array.isArray(data) ? data : (data?.items ?? data?.records ?? []);
     const records = list.map(normalizeProfileRecord).filter(Boolean).filter(r => r.profile);
     // Never cache an empty result: the gateway can transiently return no profiles
@@ -77,6 +87,8 @@
     if (typeof fetchProfilesIncludingHidden !== "function") return [];
     if (_cacheAll?.length && !force) return _cacheAll;
     const data = await fetchProfilesIncludingHidden();
+    if (data && data === _rawProfilesAll && _cacheAll?.length) return _cacheAll;
+    _rawProfilesAll = data;
     const list = Array.isArray(data) ? data : (data?.items ?? data?.records ?? []);
     const records = list.map(normalizeProfileRecord).filter(Boolean).filter(r => r.profile);
     if (records.length) _cacheAll = records;

@@ -1521,6 +1521,88 @@ function setupPresenceTracking() {
   });
 }
 
+// Silent cross-device data refresh. When the tab becomes visible again (or the
+// window regains focus), conditionally revalidate the list caches and re-render
+// whichever manager view is open. The ETag layer (core api.js) makes the
+// unchanged case a cheap 304 with an empty body, and each cache keeps a stable
+// array reference on 304 — so we only re-render (and disturb scroll/selection)
+// when the data actually changed on another device. Throttled to once / 30 s.
+async function _silentRevalidate(getFn, loadFn, renderFn) {
+  const before = getFn();
+  try { await loadFn(); } catch { return; }
+  if (getFn() !== before) renderFn();
+}
+
+// Rebuild the recipe list from a fresh store snapshot while preserving the
+// user's current selection (by id). Display-only — it never auto-pushes to the
+// machine on a background refresh.
+function _rebuildWorkflowsFromRecipes(storedRecipes) {
+  const keepId = workflowItems[selectedWorkflowIndex]?.id ?? _lastRecipeId;
+  workflowItems = Array.isArray(storedRecipes) ? [...storedRecipes] : [];
+  workflowItems.sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
+  const idx = keepId ? workflowItems.findIndex(w => w.id === keepId) : -1;
+  selectedWorkflowIndex = idx >= 0 ? idx : 0;
+  renderWorkflows(getDisplayWorkflows(), selectedWorkflowIndex);
+  renderHomeRecentRecipes();
+  setCurrentWorkflow(workflowItems.length > 0 ? workflowItems[selectedWorkflowIndex] : null);
+}
+
+function setupCrossDeviceRefresh() {
+  const THROTTLE_MS = 30_000;
+  let lastFiredAt = 0;
+  let _lastShotsResponse = null;
+
+  async function revalidateOpenViews() {
+    if (profilePickerModalEl && !profilePickerModalEl.hidden) {
+      await _silentRevalidate(NSXCore.getProfiles, () => _ensureProfilesLoaded(true), _renderProfilePickerList);
+    }
+    if (muehlenModalEl && !muehlenModalEl.hidden) {
+      await _silentRevalidate(NSXCore.getGrinders, NSXCore.loadGrinders, () => renderGrinderTiles(NSXCore.getGrinders()));
+    }
+    if (beanManagerModalEl && !beanManagerModalEl.hidden) {
+      await _silentRevalidate(NSXCore.getBeans, () => NSXCore.loadBeans(true), _beanManagerRenderList);
+    }
+
+    // Recipes + profile-favorites share the NSX store namespace → one
+    // conditional GET revalidates both.
+    const nsBefore = NSXCore.getNsxNamespace?.();
+    try { await NSXCore.loadNsxNamespace(true); } catch { /* keep cache */ }
+    const nsAfter = NSXCore.getNsxNamespace?.();
+    if (nsAfter && nsAfter !== nsBefore) {
+      // Skip the recipe rebuild while the user is mid-create (pending draft).
+      if (!workflowItems.some(w => w.isPending)) {
+        _rebuildWorkflowsFromRecipes(Array.isArray(nsAfter.recipes) ? nsAfter.recipes : []);
+      }
+      if (profilePickerModalEl && !profilePickerModalEl.hidden) {
+        await _loadProfileFavorites();
+        _renderProfilePickerList();
+      }
+    }
+
+    // History — recent shots list (ETag-backed; renders only on real change).
+    try {
+      const res = await fetchShots(200);
+      if (res && res !== _lastShotsResponse) {
+        _lastShotsResponse = res;
+        shots = Array.isArray(res.items) ? res.items : [];
+        _shotsTotalCount = Number.isFinite(res.total) ? res.total : shots.length;
+        renderHistory();
+      }
+    } catch { /* ignore */ }
+  }
+
+  function maybeFire() {
+    if (document.visibilityState !== 'visible') return;
+    const now = Date.now();
+    if (now - lastFiredAt < THROTTLE_MS) return;
+    lastFiredAt = now;
+    revalidateOpenViews();
+  }
+
+  document.addEventListener('visibilitychange', maybeFire);
+  window.addEventListener('focus', maybeFire);
+}
+
 /* ── Display Control (Reaprime Best Practice) ─────────────– */
 function setupDisplayControl() {
   const wsUrl = WS_BASE + '/ws/v1/display';
@@ -5231,10 +5313,12 @@ function _toggleProfileGroup(group) {
   _persistCollapsedProfileGroups();
 }
 
-async function _loadProfileFavorites() {
-  if (!getStoreValue) return;
+async function _loadProfileFavorites(force = false) {
   try {
-    const saved = await getStoreValue('NSX', 'profile-favorites');
+    // Read from the shared, ETag-backed NSX namespace cache so recipes and
+    // favorites reuse ONE fetch (see NSXCore.loadNsxNamespace).
+    const ns = await NSXCore.loadNsxNamespace(force);
+    const saved = ns?.['profile-favorites'];
     const ids = Array.isArray(saved) ? saved : (Array.isArray(saved?.value) ? saved.value : []);
     _profileFavorites = new Set(ids.map(String));
   } catch {
@@ -5246,6 +5330,8 @@ async function _saveProfileFavorites() {
   if (!setStoreValue) return;
   try {
     await setStoreValue('NSX', 'profile-favorites', [..._profileFavorites]);
+    // Namespace hash changed server-side — drop the shared cache.
+    NSXCore.invalidateNsxNamespace();
   } catch {
     // store API may not be available
   }
@@ -7940,7 +8026,10 @@ async function openProfilePickerModal(context = 'editor') {
   try {
     _profilePickerContext = context;
     _profilePickerShowHidden = false;
-    await Promise.all([_ensureProfilesLoaded(), _loadProfileFavorites()]);
+    // Force a conditional reload so profiles/favorites edited on another device
+    // show up. Cheap: the ETag layer turns unchanged data into a 304 (empty
+    // body), and favorites share the recipes namespace fetch (deduped).
+    await Promise.all([_ensureProfilesLoaded(true), _loadProfileFavorites(true)]);
     if (profilePickerSourceEl) profilePickerSourceEl.value = 'user';
     if (profilePickerSearchEl) profilePickerSearchEl.value = '';
     if (profilePickerAddMenuEl) profilePickerAddMenuEl.hidden = true;
@@ -10917,6 +11006,7 @@ _applyPhoneLayout();
 
 setupPresenceTracking();
 setupDisplayControl();
+setupCrossDeviceRefresh();
 
 NSXCore.migrateLegacyStore()
   .catch(() => {})

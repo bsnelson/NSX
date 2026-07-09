@@ -71,6 +71,44 @@ async function requestTryMethods(endpoint, methods, body = null) {
   throw lastError || new Error("Endpoint nicht verfuegbar");
 }
 
+// ETag-conditional GET layer (mirrors the Passione skin's approach).
+// Backs the list fetches that get re-requested on view-open / tab-resume to
+// pick up changes made on ANOTHER device. Keeps a per-URL { etag, payload }.
+// On a 304 we return the *same* payload reference we returned before — callers
+// (and the domain caches) can therefore detect "unchanged" via `===` identity
+// and skip re-rendering. Feature-detected: a 200 without an ETag header skips
+// the cache write and behaves like a plain GET next time.
+const _etagCache = new Map(); // url -> { etag, payload }
+
+async function getWithEtag(endpoint) {
+  const url = `${GATEWAY}${endpoint}`;
+  const cached = _etagCache.get(url);
+
+  const res = await fetch(url, {
+    headers: cached?.etag ? { "If-None-Match": cached.etag } : {},
+  });
+
+  if (res.status === 304 && cached) return cached.payload;
+
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const err = await res.json();
+      message = err?.message || err?.e || message;
+    } catch {
+      // keep HTTP fallback
+    }
+    throw new Error(message);
+  }
+
+  if (res.status === 204) return null;
+  const payload = await res.json().catch(() => null);
+  const etag = res.headers.get("ETag");
+  if (etag) _etagCache.set(url, { etag, payload });
+  else _etagCache.delete(url);
+  return payload;
+}
+
 function emitGatewayStatus(connected) {
   window.dispatchEvent(new CustomEvent("gateway:status", {
     detail: { connected },
@@ -466,7 +504,8 @@ async function fetchShots(limit = 20, offset = 0, search = '') {
   }
 
   const url = `/api/v1/shots?${queryParams.toString()}`;
-  return request(url);
+  // ETag-backed: lets the history view revalidate cheaply (304) on tab-resume.
+  return getWithEtag(url);
 }
 
 /**
@@ -635,12 +674,12 @@ async function updateShotMetadata(id, { rating, favorite, notes, tags, actualYie
 
 /** GET /api/v1/profiles */
 async function fetchProfiles() {
-  return request("/api/v1/profiles");
+  return getWithEtag("/api/v1/profiles");
 }
 
 /** GET /api/v1/profiles?includeHidden=true */
 async function fetchProfilesIncludingHidden() {
-  return request("/api/v1/profiles?includeHidden=true");
+  return getWithEtag("/api/v1/profiles?includeHidden=true");
 }
 
 /** GET /api/v1/profiles?visibility=deleted */
@@ -696,7 +735,9 @@ async function restoreProfile(id) {
 
 /** GET /api/v1/beans */
 async function fetchBeans(includeArchived = false) {
-  return request(`/api/v1/beans?includeArchived=${includeArchived}&_t=${Date.now()}`);
+  // No _t cache-buster: the ETag layer handles freshness (a stale copy would
+  // otherwise defeat conditional GETs by making every URL unique).
+  return getWithEtag(`/api/v1/beans?includeArchived=${includeArchived}`);
 }
 
 /** POST /api/v1/beans */
@@ -759,7 +800,7 @@ async function unarchiveBean(id, bean) {
 
 /** GET /api/v1/grinders */
 async function fetchGrinders(includeArchived = false) {
-  return request(`/api/v1/grinders?includeArchived=${encodeURIComponent(includeArchived)}`);
+  return getWithEtag(`/api/v1/grinders?includeArchived=${encodeURIComponent(includeArchived)}`);
 }
 
 /** POST /api/v1/grinders */
@@ -784,6 +825,16 @@ async function deleteGrinder(id) {
 /** GET /api/v1/store/{namespace}/{key} */
 async function getStoreValue(namespace, key) {
   return request(pathWithId(`/api/v1/store/${encodeURIComponent(namespace)}`, key));
+}
+
+/**
+ * GET /api/v1/store/{namespace}?full=1 — every key in the namespace at once.
+ * Unlike the single-key GET (which deliberately omits ETags), this endpoint
+ * IS ETag-backed, so it powers cheap cross-device revalidation. Returns a
+ * dict keyed by store key, e.g. { recipes: [...], "profile-favorites": [...] }.
+ */
+async function getStoreNamespace(namespace) {
+  return getWithEtag(`/api/v1/store/${encodeURIComponent(namespace)}?full=1`);
 }
 
 /** POST /api/v1/store/{namespace}/{key} */
@@ -850,6 +901,7 @@ window.NSXApi = {
   deleteGrinder,
   getStoreValue,
   setStoreValue,
+  getStoreNamespace,
   fetchLatestSteam,
   fetchSteamById,
   fetchMachineSettings,

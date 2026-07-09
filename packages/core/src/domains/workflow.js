@@ -33,20 +33,44 @@
   const RECIPE_NS  = "NSX";
   const RECIPE_KEY = "recipes";
 
-  async function loadRecipes() {
-    const { getStoreValue } = window.NSXApi || {};
+  // Deduped, ETag-backed cache of the whole NSX store namespace.
+  // Recipes AND profile-favorites both live under "NSX"; reading the namespace
+  // once (via GET /store/NSX?full=1) lets both consumers share a single fetch
+  // and revalidate cheaply (304 → same reference) on tab-resume — the
+  // single-key GET can't (it omits ETags).
+  let _nsRaw = null;    // last raw payload (for 304 reference identity)
+  let _nsCache = null;  // parsed dict, e.g. { recipes: [...], "profile-favorites": [...] }
+
+  async function loadNsxNamespace(force = false) {
+    const { getStoreNamespace } = window.NSXApi || {};
+    if (typeof getStoreNamespace !== "function") return _nsCache || {};
+    if (_nsCache && !force) return _nsCache;
     try {
-      const data = await getStoreValue?.(RECIPE_NS, RECIPE_KEY);
-      return Array.isArray(data) ? data : [];
+      const data = await getStoreNamespace(RECIPE_NS);
+      if (data && data === _nsRaw && _nsCache) return _nsCache; // 304 → unchanged
+      _nsRaw = data;
+      _nsCache = (data && typeof data === "object") ? data : {};
     } catch {
-      return [];
+      if (!_nsCache) _nsCache = {};
     }
+    return _nsCache;
+  }
+
+  function getNsxNamespace() { return _nsCache; }
+  function invalidateNsxNamespace() { _nsCache = null; _nsRaw = null; }
+
+  async function loadRecipes(force = false) {
+    const ns = await loadNsxNamespace(force);
+    return Array.isArray(ns?.[RECIPE_KEY]) ? ns[RECIPE_KEY] : [];
   }
 
   async function saveRecipes(recipes) {
     const { setStoreValue } = window.NSXApi || {};
     try {
       await setStoreValue?.(RECIPE_NS, RECIPE_KEY, recipes);
+      // The namespace hash changed server-side — drop the cache so the next
+      // read (or revalidation) fetches fresh instead of returning stale data.
+      invalidateNsxNamespace();
     } catch (err) {
       console.warn("Recipes could not be saved:", err?.message);
     }
@@ -213,6 +237,9 @@
     loadRecipes,
     saveRecipes,
     makeRecipeId,
+    loadNsxNamespace,
+    getNsxNamespace,
+    invalidateNsxNamespace,
     workflowToGatewayPayload,
     buildGatewayPayload,
   });
