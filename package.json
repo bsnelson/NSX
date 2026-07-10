@@ -8,6 +8,10 @@
   ],
   "scripts": {
     "sync-core": "node scripts/sync-core.mjs",
-    "test": "node --test \"packages/core/test/*.test.mjs\""
+    "test": "node --test \"packages/core/test/*.test.mjs\"",
+    "dev:mock": "npm run sync-core && node tests/mock-gateway/server.mjs"
+  },
+  "devDependencies": {
+    "ws": "^8.21.0"
   }
 }
