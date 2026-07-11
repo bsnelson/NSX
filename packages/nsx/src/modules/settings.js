@@ -620,6 +620,9 @@
         [['home', 'Home'], ['recipe', 'Recipes']],
         ctrl.getStartTab(),
         v => ctrl.setStartTab(v))),
+      row('Show Refresh Button', 'Adds a manual refresh button to the header', toggle(
+        ctrl.getShowRefreshButton(),
+        v => ctrl.setShowRefreshButton(v))),
     );
     target.appendChild(s1.wrap);
 
@@ -742,6 +745,7 @@
       cupVal,
       btn('Measure', null, () => { const w = ctrl.measureDosingCup?.(); if (w != null) setCupLabel(w); }),
       btn('Clear', null, () => { ctrl.setDosingCupWeight?.(0); setCupLabel(0); }),
+      btn('Tare', null, () => ctrl.tare?.()),
     );
     sScale.rows.append(
       row('Dosing Cup Weight', '0 g = tare the cup first, then dose. Or set the cup weight to dose without taring — it is subtracted from the total. (Place empty cup, tap Measure.)', cupControl),

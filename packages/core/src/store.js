@@ -44,24 +44,72 @@
     "nsx_schedule",
   ];
 
+  // Settings whose VALUE is one nested object holding several independently
+  // edited fields (steam/hotwater/flush presets: { preset: { temp, flow, ... }}).
+  // The per-field KEY split stops cross-key clobber, but two devices editing
+  // different fields of the same object still would — so these get a field-level
+  // 3-way merge on write (read the server's current value, merge, then write).
+  const MERGEABLE_KEYS = new Set([
+    "nsx_steam_presets",
+    "nsx_hotwater_presets",
+    "nsx_flush_presets",
+  ]);
+
   // The one stable store object. Never reassigned — only mutated in place.
   const storeSettings = {};
   // Keys changed since the last flush — only these get written, one KV key each.
   const pendingKeys = new Set();
+  // Per-key snapshot of the value as we last loaded/persisted it — the base for
+  // the 3-way merge, so we only overwrite fields WE changed.
+  const settingsBase = {};
   let persistTimer = null;
 
   const api = () => window.NSXApi || {};
 
+  const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const clone = (v) => { try { return structuredClone(v); } catch { return JSON.parse(JSON.stringify(v ?? null)); } };
+  const deepEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  // Field-level 3-way merge. Scalars/arrays: our value wins only if we changed
+  // it from `base`; otherwise the server's value is kept (so another device's
+  // change to a field we didn't touch survives). Recurses into plain objects.
+  function threeWayMerge(base, ours, theirs) {
+    if (!isPlainObject(ours) || !isPlainObject(theirs)) {
+      return deepEqual(ours, base) ? theirs : ours;
+    }
+    const out = {};
+    for (const k of new Set([...Object.keys(ours), ...Object.keys(theirs)])) {
+      if (k in ours && k in theirs) out[k] = threeWayMerge(base?.[k], ours[k], theirs[k]);
+      else if (k in ours) out[k] = ours[k];
+      else out[k] = theirs[k];
+    }
+    return out;
+  }
+
+  async function persistKey(key) {
+    const { setStoreValue, getStoreValue } = api();
+    const ours = storeSettings[key];
+    let toWrite = ours;
+    if (MERGEABLE_KEYS.has(key) && isPlainObject(ours) && typeof getStoreValue === "function") {
+      try {
+        const server = await getStoreValue(STORE_NAMESPACE, key); // single-key GET is always fresh
+        if (isPlainObject(server)) toWrite = threeWayMerge(settingsBase[key], ours, server);
+      } catch { /* fall back to writing ours */ }
+    }
+    await setStoreValue(STORE_NAMESPACE, key, toWrite);
+    // Base tracks what THIS client last synced (ours), so a field we never
+    // changed keeps deferring to the server on the next merge.
+    settingsBase[key] = clone(ours);
+  }
+
   function scheduleStorePersist() {
-    const setStoreValue = api().setStoreValue;
-    if (typeof setStoreValue !== "function") return;
+    if (typeof api().setStoreValue !== "function") return;
     clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
       const keys = [...pendingKeys];
       pendingKeys.clear();
       for (const key of keys) {
-        Promise.resolve(setStoreValue(STORE_NAMESPACE, key, storeSettings[key]))
-          .catch((err) => console.debug("Store save failed:", key, err?.message || err));
+        persistKey(key).catch((err) => console.debug("Store save failed:", key, err?.message || err));
       }
     }, 300);
   }
@@ -81,6 +129,9 @@
     if (!data || typeof data !== "object") return storeSettings;
     for (const key of Object.keys(storeSettings)) delete storeSettings[key];
     Object.assign(storeSettings, data);
+    // Reset the merge base to the freshly loaded server state.
+    for (const key of Object.keys(settingsBase)) delete settingsBase[key];
+    for (const [key, value] of Object.entries(data)) settingsBase[key] = clone(value);
     return storeSettings;
   }
 
@@ -219,6 +270,7 @@
     getStore: () => storeSettings,
     patchStore,
     replaceStore,
+    threeWayMerge,
     saveActivePresetName,
     migrateLegacyStore,
     loadStore,

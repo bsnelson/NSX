@@ -1547,60 +1547,118 @@ function _rebuildWorkflowsFromRecipes(storedRecipes) {
   setCurrentWorkflow(workflowItems.length > 0 ? workflowItems[selectedWorkflowIndex] : null);
 }
 
-function setupCrossDeviceRefresh() {
-  const THROTTLE_MS = 30_000;
-  let lastFiredAt = 0;
-  let _lastShotsResponse = null;
+let _lastShotsResponse = null;
 
-  async function revalidateOpenViews() {
-    if (profilePickerModalEl && !profilePickerModalEl.hidden) {
-      await _silentRevalidate(NSXCore.getProfiles, () => _ensureProfilesLoaded(true), _renderProfilePickerList);
-    }
-    if (muehlenModalEl && !muehlenModalEl.hidden) {
-      await _silentRevalidate(NSXCore.getGrinders, NSXCore.loadGrinders, () => renderGrinderTiles(NSXCore.getGrinders()));
-    }
-    if (beanManagerModalEl && !beanManagerModalEl.hidden) {
-      await _silentRevalidate(NSXCore.getBeans, () => NSXCore.loadBeans(true), _beanManagerRenderList);
-    }
-
-    // Recipes + profile-favorites share the NSX store namespace → one
-    // conditional GET revalidates both.
-    const nsBefore = NSXCore.getNsxNamespace?.();
-    try { await NSXCore.loadNsxNamespace(true); } catch { /* keep cache */ }
-    const nsAfter = NSXCore.getNsxNamespace?.();
-    if (nsAfter && nsAfter !== nsBefore) {
-      // Skip the recipe rebuild while the user is mid-create (pending draft).
-      if (!workflowItems.some(w => w.isPending)) {
-        _rebuildWorkflowsFromRecipes(Array.isArray(nsAfter.recipes) ? nsAfter.recipes : []);
-      }
-      if (profilePickerModalEl && !profilePickerModalEl.hidden) {
-        await _loadProfileFavorites();
-        _renderProfilePickerList();
-      }
-    }
-
-    // History — recent shots list (ETag-backed; renders only on real change).
-    try {
-      const res = await fetchShots(200);
-      if (res && res !== _lastShotsResponse) {
-        _lastShotsResponse = res;
-        shots = Array.isArray(res.items) ? res.items : [];
-        _shotsTotalCount = Number.isFinite(res.total) ? res.total : shots.length;
-        renderHistory();
-      }
-    } catch { /* ignore */ }
+// Silently revalidate the list data (recipes, favorites, history, and any open
+// manager view) and re-render only what actually changed on another device.
+async function revalidateOpenViews() {
+  if (profilePickerModalEl && !profilePickerModalEl.hidden) {
+    await _silentRevalidate(NSXCore.getProfiles, () => _ensureProfilesLoaded(true), _renderProfilePickerList);
+  }
+  if (muehlenModalEl && !muehlenModalEl.hidden) {
+    await _silentRevalidate(NSXCore.getGrinders, NSXCore.loadGrinders, () => renderGrinderTiles(NSXCore.getGrinders()));
+  }
+  if (beanManagerModalEl && !beanManagerModalEl.hidden) {
+    await _silentRevalidate(NSXCore.getBeans, () => NSXCore.loadBeans(true), _beanManagerRenderList);
   }
 
+  // Recipes + profile-favorites share the NSX store namespace → one
+  // conditional GET revalidates both.
+  const nsBefore = NSXCore.getNsxNamespace?.();
+  try { await NSXCore.loadNsxNamespace(true); } catch { /* keep cache */ }
+  const nsAfter = NSXCore.getNsxNamespace?.();
+  if (nsAfter && nsAfter !== nsBefore) {
+    // Skip the recipe rebuild while the user is mid-create (pending draft).
+    if (!workflowItems.some(w => w.isPending)) {
+      _rebuildWorkflowsFromRecipes(Array.isArray(nsAfter.recipes) ? nsAfter.recipes : []);
+    }
+    if (profilePickerModalEl && !profilePickerModalEl.hidden) {
+      await _loadProfileFavorites();
+      _renderProfilePickerList();
+    }
+  }
+
+  // History — recent shots list (ETag-backed; renders only on real change).
+  try {
+    const res = await fetchShots(200);
+    if (res && res !== _lastShotsResponse) {
+      _lastShotsResponse = res;
+      shots = Array.isArray(res.items) ? res.items : [];
+      _shotsTotalCount = Number.isFinite(res.total) ? res.total : shots.length;
+      renderHistory();
+    }
+  } catch { /* ignore */ }
+}
+
+// Re-read the settings store (ETag-backed) and re-apply the machine-function
+// presets. Unlike the full boot hydrate this deliberately skips brightness /
+// screensaver / presence side effects — it only refreshes what another device
+// may have changed and this device shows: steam / hot water / flush presets.
+// (nsx_steam_presets is one KV object, so a truly simultaneous edit of the same
+// preset on two devices still races; this at least surfaces the other side's
+// change so it isn't silently saved over.)
+async function _reconcileSettingsFromStore() {
+  try {
+    if (!(await NSXCore.loadStore())) return;
+    NSXCore.hydrateSteam?.();
+    NSXCore.hydrateHotwater?.();
+    NSXCore.hydrateFlush?.();
+    applyPresetButtonStates?.();
+    _applyRefreshButtonVisibility();
+    if (typeof storeSettings.nsx_last_recipe_id === 'string') _lastRecipeId = storeSettings.nsx_last_recipe_id;
+  } catch { /* ignore */ }
+}
+
+// The header refresh button is opt-in (Interface settings → Show Refresh
+// Button). Hidden by default.
+function _applyRefreshButtonVisibility() {
+  const btn = document.getElementById('btn-refresh');
+  if (btn) btn.hidden = storeSettings.nsx_show_refresh_button !== true;
+}
+
+// User-initiated full refresh (the header button). Does the heavier settings
+// reconcile in addition to the list revalidation, since it's explicit.
+let _manualRefreshInFlight = false;
+async function manualRefresh() {
+  if (_manualRefreshInFlight) return;
+  _manualRefreshInFlight = true;
+  const btn = document.getElementById('btn-refresh');
+  btn?.classList.add('is-spinning');
+  try {
+    await _reconcileSettingsFromStore();
+    await revalidateOpenViews();
+  } finally {
+    _manualRefreshInFlight = false;
+    setTimeout(() => btn?.classList.remove('is-spinning'), 400);
+  }
+}
+
+function setupCrossDeviceRefresh() {
+  const RESUME_THROTTLE_MS = 30_000;
+  let lastResumeAt = 0;
   function maybeFire() {
     if (document.visibilityState !== 'visible') return;
     const now = Date.now();
-    if (now - lastFiredAt < THROTTLE_MS) return;
-    lastFiredAt = now;
+    if (now - lastResumeAt < RESUME_THROTTLE_MS) return;
+    lastResumeAt = now;
     revalidateOpenViews();
   }
-
   document.addEventListener('visibilitychange', maybeFire);
   window.addEventListener('focus', maybeFire);
+
+  // Tab navigation is the natural refresh point on a kiosk tablet, where the
+  // page never actually hides so visibilitychange/focus rarely fire. Lighter
+  // throttle so flipping between Home/Recipes/History pulls fresh data.
+  const TAB_THROTTLE_MS = 4_000;
+  let lastTabAt = 0;
+  window.addEventListener('router:tabchange', () => {
+    const now = Date.now();
+    if (now - lastTabAt < TAB_THROTTLE_MS) return;
+    lastTabAt = now;
+    revalidateOpenViews();
+  });
+
+  document.getElementById('btn-refresh')?.addEventListener('click', manualRefresh);
 }
 
 /* ── Display Control (Reaprime Best Practice) ─────────────– */
@@ -2414,6 +2472,11 @@ window.NSXSkinControls = {
   setStartTab(v) {
     patchStoreSettings({ nsx_start_tab: v === 'recipe' ? 'recipe' : 'home' });
   },
+  getShowRefreshButton: () => storeSettings.nsx_show_refresh_button === true,
+  setShowRefreshButton(v) {
+    patchStoreSettings({ nsx_show_refresh_button: Boolean(v) });
+    _applyRefreshButtonVisibility();
+  },
   setLang(lang) {
     setLang?.(lang);
     setStoreValue('skin', 'lang', lang).catch(() => {});
@@ -2500,6 +2563,9 @@ window.NSXSkinControls = {
     showToast(`Dosing cup weight set to ${rounded} g`);
     return rounded;
   },
+  // Tare the scale (same connect-check + feedback as the header tare button),
+  // exposed so settings/other UIs can offer their own tare button.
+  tare() { _tareScale(); },
 
   getRatioDoseEnabled: () => _ratioDoseEnabled,
   setRatioDoseEnabled(v) {
@@ -3254,6 +3320,19 @@ async function _fetchAndShowLastSteam() {
   }
 }
 
+// Shared tare helper — same connect-check + feedback as the header tare button.
+function _tareScale() {
+  signalUserPresence();
+  if (!scaleConnected) {
+    initiateScaleConnect?.();
+    showToast(t('toast.scaleConnecting'));
+    return;
+  }
+  tareScale?.()
+    .then(() => showToast(t('toast.scaleTared')))
+    .catch((err) => showToast(t('toast.tareFailed') + ': ' + (err?.message || err)));
+}
+
 document.getElementById('btn-calib-measure-milk')?.addEventListener('click', () => {
   if (!scaleConnected) { showToast('Scale not connected'); return; }
   const w = liveWeight;
@@ -3261,6 +3340,13 @@ document.getElementById('btn-calib-measure-milk')?.addEventListener('click', () 
   if (_calibDraft?.[_calibActivePreset]) {
     _calibDraft[_calibActivePreset].milkWeight = Math.round(w * 10) / 10;
   }
+  _renderCalibCard();
+});
+
+document.getElementById('btn-calib-tare')?.addEventListener('click', _tareScale);
+
+document.getElementById('btn-calib-clear')?.addEventListener('click', () => {
+  if (_calibDraft?.[_calibActivePreset]) _calibDraft[_calibActivePreset].milkWeight = null;
   _renderCalibCard();
 });
 
@@ -3305,6 +3391,17 @@ steamSettingsModalEl?.querySelectorAll('.pitcher-preset-card[data-pitcher] .pitc
     const w = liveWeight;
     if (!Number.isFinite(w) || w <= 0) { showToast('Tare the scale first, then place the pitcher'); return; }
     if (_pitcherDraft?.[idx]) _pitcherDraft[idx].pitcherWeight = Math.round(w * 10) / 10;
+    _renderPitcherPresetCards();
+  });
+});
+
+steamSettingsModalEl?.querySelectorAll('.pitcher-preset-card[data-pitcher] .pitcher-tare-btn').forEach((btn) => {
+  btn.addEventListener('click', _tareScale);
+});
+
+steamSettingsModalEl?.querySelectorAll('.pitcher-preset-card[data-pitcher] .pitcher-clear-btn').forEach((btn, idx) => {
+  btn.addEventListener('click', () => {
+    if (_pitcherDraft?.[idx]) _pitcherDraft[idx].pitcherWeight = null;
     _renderPitcherPresetCards();
   });
 });
@@ -3710,6 +3807,8 @@ async function hydrateUiSettingsFromStore() {
     if (typeof storeSettings.nsx_last_recipe_id === 'string') {
       _lastRecipeId = storeSettings.nsx_last_recipe_id;
     }
+
+    _applyRefreshButtonVisibility();
 
     if (storeSettings.nsx_series_visibility && typeof storeSettings.nsx_series_visibility === 'object') {
       window.NSXUI?.setSeriesVisibility('workflow', storeSettings.nsx_series_visibility);

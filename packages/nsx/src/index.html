@@ -28,6 +28,13 @@
        <!-- ── Shared page header ────────────────────────────── -->
        <header class="page-header">
          <h2 id="page-title" class="section-title">Home</h2>
+         <button type="button" id="btn-refresh" class="page-refresh-btn" aria-label="Aktualisieren" title="Aktualisieren" data-i18n-aria="action.refresh" hidden>
+           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+             <polyline points="23 4 23 10 17 10"></polyline>
+             <polyline points="1 20 1 14 7 14"></polyline>
+             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+           </svg>
+         </button>
 
          <!-- Temperature orbs -->
          <section class="header-temperature-panel" aria-label="Temperaturen">
@@ -1839,6 +1846,8 @@
                   <div class="pitcher-weight-row">
                     <span id="calib-milk-weight" class="pitcher-weight-value">— g</span>
                     <button type="button" id="btn-calib-measure-milk" class="pitcher-measure-btn">Measure</button>
+                    <button type="button" id="btn-calib-tare" class="pitcher-tare-btn">Tare</button>
+                    <button type="button" id="btn-calib-clear" class="pitcher-clear-btn">Clear</button>
                   </div>
                 </div>
                 <div class="pitcher-preset-row">
@@ -1865,6 +1874,8 @@
                   <div class="pitcher-weight-row">
                     <span class="pitcher-weight-value">— g</span>
                     <button type="button" class="pitcher-measure-btn">Measure</button>
+                    <button type="button" class="pitcher-tare-btn">Tare</button>
+                    <button type="button" class="pitcher-clear-btn">Clear</button>
                   </div>
                 </div>
               </div>
@@ -1881,6 +1892,8 @@
                   <div class="pitcher-weight-row">
                     <span class="pitcher-weight-value">— g</span>
                     <button type="button" class="pitcher-measure-btn">Measure</button>
+                    <button type="button" class="pitcher-tare-btn">Tare</button>
+                    <button type="button" class="pitcher-clear-btn">Clear</button>
                   </div>
                 </div>
               </div>
@@ -1897,6 +1910,8 @@
                   <div class="pitcher-weight-row">
                     <span class="pitcher-weight-value">— g</span>
                     <button type="button" class="pitcher-measure-btn">Measure</button>
+                    <button type="button" class="pitcher-tare-btn">Tare</button>
+                    <button type="button" class="pitcher-clear-btn">Clear</button>
                   </div>
                 </div>
               </div>
