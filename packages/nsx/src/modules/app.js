@@ -2260,6 +2260,7 @@ function _applySkinBrightness(level, persist = true) {
 function _pushScreensaverConfig() {
   const lvl = Number(storeSettings.nsx_screensaver_brightness);
   window.NSXScreensaver?.setConfig?.({
+    customOnly:        storeSettings.nsx_ss_custom_only === true,
     dimEnabled:        storeSettings.nsx_screensaver_dim_enabled !== false,
     dimLevel:          Number.isFinite(lvl) ? lvl : 50,
     wakeLockNormal:    storeSettings.nsx_wakelock_normal !== false,
@@ -2508,6 +2509,17 @@ window.NSXSkinControls = {
     patchStoreSettings({ nsx_screensaver_brightness: Number.isFinite(n) ? n : 50 });
     _pushScreensaverConfig();
   },
+  getScreensaverImages: () => window.NSXScreensaver?.getCustomImages?.() || [],
+  getScreensaverMaxImages: () => window.NSXScreensaver?.maxCustomImages ?? 20,
+  addScreensaverImages: (files) => window.NSXScreensaver?.addCustomImages?.(files),
+  removeScreensaverImage: (i) => window.NSXScreensaver?.removeCustomImage?.(i),
+  clearScreensaverImages: () => window.NSXScreensaver?.clearCustomImages?.(),
+  getScreensaverCustomOnly: () => storeSettings.nsx_ss_custom_only === true,
+  setScreensaverCustomOnly(v) {
+    patchStoreSettings({ nsx_ss_custom_only: Boolean(v) });
+    _pushScreensaverConfig();
+  },
+
   getWakeLockNormal: () => storeSettings.nsx_wakelock_normal !== false,
   setWakeLockNormal(v) {
     patchStoreSettings({ nsx_wakelock_normal: Boolean(v) });
@@ -3841,6 +3853,7 @@ async function hydrateUiSettingsFromStore() {
     });
 
     _pushScreensaverConfig();
+    window.NSXScreensaver?.loadCustomImages?.();
 
     setSteamWidget(NSXCore.getSteamTemp(), NSXCore.getSteamFlow(), NSXCore.getSteamDuration());
     _applySteamEnabledDOM();

@@ -9,8 +9,108 @@
     disconnectScale,
   } = window.NSXApi || {};
 
-  const SS_IMAGES = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15]
+  const SS_DEFAULT_IMAGES = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15]
     .map(n => `ui/screensaver/Screen_saver_Decent_${n}.jpg`);
+
+  // Custom backgrounds are device-local: they live in IndexedDB, not in the
+  // gateway store, so a phone photo doesn't get base64'd into every device's
+  // settings payload. Each device therefore has its own set.
+  const SS_DB_NAME = "nsx";
+  const SS_DB_STORE = "screensaver";
+  const SS_DB_KEY = "images";
+  const SS_MAX_IMAGES = 20;
+  const SS_MAX_EDGE = 1600;      // downscale before storing — phone photos are huge
+  const SS_JPEG_QUALITY = 0.82;
+
+  let ssCustomImages = [];
+  let ssCustomOnly = false;
+
+  function ssOpenDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(SS_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains(SS_DB_STORE)) req.result.createObjectStore(SS_DB_STORE);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function ssDbRequest(mode, run) {
+    return ssOpenDb().then(db => new Promise((resolve, reject) => {
+      const req = run(db.transaction(SS_DB_STORE, mode).objectStore(SS_DB_STORE));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    }));
+  }
+
+  /** Read a picked file and re-encode it to a bounded JPEG data URL. */
+  function ssFileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error("decode failed"));
+        img.onload = () => {
+          const scale = Math.min(1, SS_MAX_EDGE / Math.max(img.width, img.height));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/jpeg", SS_JPEG_QUALITY));
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /** The rotation actually shown: custom-only, or the built-ins plus any custom. */
+  function ssImages() {
+    if (!ssCustomImages.length) return SS_DEFAULT_IMAGES;
+    return ssCustomOnly ? ssCustomImages : SS_DEFAULT_IMAGES.concat(ssCustomImages);
+  }
+
+  async function loadCustomImages() {
+    try {
+      const stored = await ssDbRequest("readonly", s => s.get(SS_DB_KEY));
+      ssCustomImages = Array.isArray(stored) ? stored : [];
+    } catch {
+      ssCustomImages = [];
+    }
+    return ssCustomImages;
+  }
+
+  async function ssPersistCustomImages() {
+    await ssDbRequest("readwrite", s => s.put(ssCustomImages, SS_DB_KEY));
+    if (ssActive) {
+      ssImgIndex = 0;
+      ssCrossfade(ssImages()[0]);
+    }
+  }
+
+  /** Add picked files; returns the new total. Throws if storing fails. */
+  async function addCustomImages(files) {
+    const list = Array.from(files || []);
+    if (!list.length) return ssCustomImages.length;
+    const room = Math.max(0, SS_MAX_IMAGES - ssCustomImages.length);
+    const urls = await Promise.all(list.slice(0, room).map(ssFileToDataUrl));
+    ssCustomImages = ssCustomImages.concat(urls);
+    await ssPersistCustomImages();
+    return ssCustomImages.length;
+  }
+
+  async function removeCustomImage(index) {
+    ssCustomImages = ssCustomImages.filter((_, i) => i !== index);
+    await ssPersistCustomImages();
+    return ssCustomImages.length;
+  }
+
+  async function clearCustomImages() {
+    ssCustomImages = [];
+    await ssPersistCustomImages();
+  }
 
   let ssActive = false;
   let ssImgIndex = 0;
@@ -100,8 +200,9 @@
     syncWakeLock();
     if (scalePowerMode === "disconnect") disconnectScale?.();
 
-    ssImgIndex = Math.floor(Math.random() * SS_IMAGES.length);
-    const initUrl = SS_IMAGES[ssImgIndex];
+    const images = ssImages();
+    ssImgIndex = Math.floor(Math.random() * images.length);
+    const initUrl = images[ssImgIndex];
     if (ssBgA) {
       ssBgA.style.backgroundImage = `url(${initUrl})`;
       ssBgA.style.opacity = "1";
@@ -142,8 +243,9 @@
 
     ssClockTimer = setInterval(ssUpdateClock, 1000);
     ssImageTimer = setInterval(() => {
-      ssImgIndex = (ssImgIndex + 1) % SS_IMAGES.length;
-      ssCrossfade(SS_IMAGES[ssImgIndex]);
+      const list = ssImages();
+      ssImgIndex = (ssImgIndex + 1) % list.length;
+      ssCrossfade(list[ssImgIndex]);
     }, 30000);
   }
 
@@ -298,7 +400,14 @@
       ssEnabled = Boolean(v);
       if (!ssEnabled && ssActive) hide(false);
     },
+    loadCustomImages,
+    getCustomImages: () => ssCustomImages.slice(),
+    addCustomImages,
+    removeCustomImage,
+    clearCustomImages,
+    maxCustomImages: SS_MAX_IMAGES,
     setConfig(cfg = {}) {
+      if (typeof cfg.customOnly === 'boolean') ssCustomOnly = cfg.customOnly;
       if (typeof cfg.dimEnabled === 'boolean') ssDimEnabled = cfg.dimEnabled;
       if (Number.isFinite(cfg.dimLevel)) ssDimLevel = cfg.dimLevel;
       if (typeof cfg.wakeLockNormal === 'boolean') ssWakeLockNormal = cfg.wakeLockNormal;

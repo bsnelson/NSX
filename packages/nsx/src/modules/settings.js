@@ -765,12 +765,70 @@
     const keepLockedRow = row('Keep Screen On While Locked', 'Keep the screen awake showing the clock instead of letting the tablet sleep',
       toggle(ctrl.getWakeLockLocked?.() === true, v => ctrl.setWakeLockLocked?.(v)));
 
+    const fileInput = h('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.multiple = true;
+    fileInput.hidden = true;
+
+    const thumbStrip = h('div', 'stg-ss-thumbs');
+    const imgControl = h('div');
+    imgControl.style.cssText = 'display:flex; align-items:center; gap:8px;';
+    const addBtn = btn('Add Images', null, () => fileInput.click());
+    const clearBtn = btn('Clear', null, async () => {
+      await ctrl.clearScreensaverImages?.();
+      renderThumbs();
+    });
+    imgControl.append(addBtn, clearBtn, fileInput);
+
+    const customOnlyRow = row('Only Own Images', 'Hide the built-in Decent photos and rotate only your own',
+      toggle(ctrl.getScreensaverCustomOnly?.() === true, v => ctrl.setScreensaverCustomOnly?.(v)));
+
+    const imgRow = colRow('Own Background Images', 'Stored on this device only — tap an image to remove it', thumbStrip);
+
+    function renderThumbs() {
+      const images = ctrl.getScreensaverImages?.() || [];
+      const max = ctrl.getScreensaverMaxImages?.() ?? 20;
+      thumbStrip.textContent = '';
+      images.forEach((src, i) => {
+        const t = h('button', 'stg-ss-thumb');
+        t.style.backgroundImage = `url("${src}")`;
+        t.title = 'Remove';
+        t.addEventListener('click', async () => {
+          await ctrl.removeScreensaverImage?.(i);
+          renderThumbs();
+        });
+        thumbStrip.appendChild(t);
+      });
+      if (!images.length) thumbStrip.appendChild(h('div', 'stg-row-sublabel', 'No images added'));
+      addBtn.disabled = images.length >= max;
+      clearBtn.hidden = !images.length;
+      customOnlyRow.hidden = !images.length;
+    }
+
+    fileInput.addEventListener('change', async () => {
+      try {
+        await ctrl.addScreensaverImages?.(fileInput.files);
+      } catch {
+        /* keep the panel usable if a file can't be decoded or stored */
+      }
+      fileInput.value = '';
+      renderThumbs();
+    });
+
     const applyLockVisibility = (on) => {
       wakeUnlockRow.hidden = !on;
       dimRow.hidden = !on;
       dimLevelRow.hidden = !on || ctrl.getScreensaverDimEnabled?.() === false;
       keepLockedRow.hidden = !on;
+      imgRow.hidden = !on;
+      imgControlRow.hidden = !on;
+      if (on) renderThumbs();
+      else customOnlyRow.hidden = true;
     };
+
+    const imgControlRow = row(null, null, imgControl);
+    imgControlRow.style.justifyContent = 'flex-end';
 
     sLock.rows.append(
       row('Enable Lockscreen', 'Disable if using the device\'s own lock screen',
@@ -779,6 +837,9 @@
       dimRow,
       dimLevelRow,
       keepLockedRow,
+      imgRow,
+      imgControlRow,
+      customOnlyRow,
       row('Keep Screen Awake (normal use)', 'When off, the tablet can sleep on its own — needed if you disable the lockscreen',
         toggle(ctrl.getWakeLockNormal?.() !== false, v => ctrl.setWakeLockNormal?.(v))),
     );

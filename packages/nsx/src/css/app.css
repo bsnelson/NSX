@@ -11046,6 +11046,25 @@ body.hide-recipe-card-rating #workflow-list .recipe-rating {
 .stg-slider { flex: 1; min-width: 0; accent-color: var(--c-blue); height: 28px; cursor: pointer; }
 .stg-slider-val { font-size: var(--fs-micro); color: var(--c-label-2); min-width: 28px; }
 
+/* ── Screensaver thumbnails ── */
+.stg-ss-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+.stg-ss-thumb {
+  width: 92px;
+  height: 58px;
+  border: 1px solid var(--c-separator);
+  border-radius: 8px;
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  padding: 0;
+}
+.stg-ss-thumb:active { opacity: 0.6; }
+
 /* ── Buttons ── */
 .stg-btn {
   padding: 7px 16px;
